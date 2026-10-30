@@ -237,8 +237,10 @@ def train(
     total_time = time.time() - t0
     print(f"Training completed in {total_time:.1f}s. Best Val Loss: {best_val_loss:.4f}, Val Acc: {best_val_acc*100:.2f}%")
 
+    # Keep condition-holdout artifacts separate from the standard benchmark.
+    split_suffix = "" if split_strategy == "scenario" else f"_{split_strategy}_{str(holdout_value).replace('.', 'p')}"
     # Plot training curves
-    plot_path = FIGURES_DIR / f"training_history_{model_name}.png"
+    plot_path = FIGURES_DIR / f"training_history_{model_name}{split_suffix}.png"
     plot_training_curves(history, plot_path)
 
     # Save training configuration
@@ -267,7 +269,10 @@ def train(
         },
         'classes': STANDARD_CLASSES
     }
-    with open(CONFIG_PATH, 'w') as f:
+    config_path = CONFIG_PATH if split_strategy == 'scenario' else CONFIG_PATH.with_name(
+        f"config_{split_strategy}_{str(holdout_value).replace('.', 'p')}.json"
+    )
+    with open(config_path, 'w') as f:
         json.dump(config_data, f, indent=2)
 
     return {
