@@ -137,8 +137,10 @@ def evaluate(
     # Confusion matrix
     cm = confusion_matrix(y_true, y_pred, labels=range(NUM_CLASSES))
 
+    # Keep condition-holdout artifacts separate from the standard benchmark.
+    split_suffix = "" if split_strategy == "scenario" else f"_{split_strategy}_{str(holdout_value).replace('.', 'p')}"
     # Plot confusion matrix
-    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}.png"
+    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}{split_suffix}.png"
     plot_confusion_matrix(cm, STANDARD_CLASSES, cm_plot_path)
 
     metrics_result = {
@@ -161,8 +163,12 @@ def evaluate(
         'confusion_matrix': cm.tolist()
     }
 
-    # Save metrics JSON
+    # Save metrics JSON without overwriting the standard benchmark result.
     metrics_output_path = Path(metrics_output_path)
+    if split_strategy != "scenario" and metrics_output_path == EVALUATION_METRICS_PATH:
+        metrics_output_path = metrics_output_path.with_name(
+            f"evaluation_metrics_{split_strategy}_{str(holdout_value).replace('.', 'p')}.json"
+        )
     metrics_output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(metrics_output_path, 'w') as f:
         json.dump(metrics_result, f, indent=2)
