@@ -59,41 +59,71 @@ class GridSentryDataset(Dataset):
         return self.waveforms[idx], self.labels[idx]
 
 
-def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
+def get_scenario_splits(
+    random_seed: int = RANDOM_SEED,
+    split_strategy: str = "scenario",
+    holdout_value: float = 20
+) -> Tuple[set, set, set]:
     """
-    Partitions the 171 physical simulation scenarios (distance, resistance, angle)
-    into Train (~70%), Val (~15%), Test (~15%), stratified across (dist, rf) operating conditions.
-    Uses a local RNG so calling this function does not mutate global NumPy state.
+    Build leakage-aware physical-scenario partitions.
+
+    scenario: random angle holdout within every distance/resistance pair.
+    distance: hold out every scenario at one complete distance.
+    resistance: hold out every scenario at one complete fault resistance.
+
+    For condition holdouts, validation scenarios are selected only from the
+    remaining conditions; the held-out condition is used exclusively for test.
     """
+    if split_strategy not in {"scenario", "distance", "resistance"}:
+        raise ValueError("split_strategy must be scenario, distance, or resistance")
+
     rng = np.random.default_rng(random_seed)
     dists = [20, 150, 280]
     rfs = [1.0, 50.0, 100.0]
-    angles = list(range(0, 190, 10))  # 19 angles
+    angles = list(range(0, 190, 10))
 
-    train_scenarios = set()
-    val_scenarios = set()
-    test_scenarios = set()
+    if split_strategy == "distance" and holdout_value not in dists:
+        raise ValueError(f"holdout distance must be one of {dists}")
+    if split_strategy == "resistance" and float(holdout_value) not in rfs:
+        raise ValueError(f"holdout resistance must be one of {rfs}")
+
+    train_scenarios, val_scenarios, test_scenarios = set(), set(), set()
 
     for d in dists:
         for r in rfs:
+            if split_strategy == "distance" and d == holdout_value:
+                test_scenarios.update((d, r, a) for a in angles)
+                continue
+            if split_strategy == "resistance" and r == float(holdout_value):
+                test_scenarios.update((d, r, a) for a in angles)
+                continue
+
             shuffled_angles = rng.permutation(angles).tolist()
-            # 19 angles per (d, r): 13 train (~68.4%), 3 val (~15.8%), 3 test (~15.8%)
-            tr_a = shuffled_angles[:13]
-            va_a = shuffled_angles[13:16]
-            te_a = shuffled_angles[16:19]
+            if split_strategy == "scenario":
+                tr_a, va_a, te_a = shuffled_angles[:13], shuffled_angles[13:16], shuffled_angles[16:19]
+                train_scenarios.update((d, r, a) for a in tr_a)
+                val_scenarios.update((d, r, a) for a in va_a)
+                test_scenarios.update((d, r, a) for a in te_a)
+            else:
+                # Keep a validation subset from non-held-out conditions.
+                va_a = shuffled_angles[:3]
+                tr_a = shuffled_angles[3:]
+                val_scenarios.update((d, r, a) for a in va_a)
+                train_scenarios.update((d, r, a) for a in tr_a)
 
-            for a in tr_a:
-                train_scenarios.add((d, r, a))
-            for a in va_a:
-                val_scenarios.add((d, r, a))
-            for a in te_a:
-                test_scenarios.add((d, r, a))
+    all_scenarios = train_scenarios | val_scenarios | test_scenarios
+    if len(all_scenarios) != 171:
+        raise RuntimeError(f"Expected 171 unique scenarios, found {len(all_scenarios)}")
+    if (train_scenarios & val_scenarios) or (train_scenarios & test_scenarios) or (val_scenarios & test_scenarios):
+        raise RuntimeError("Scenario split overlap detected")
+    if split_strategy == "distance" and any(s[0] != holdout_value for s in test_scenarios):
+        raise RuntimeError("Distance holdout contains an unexpected test scenario")
+    if split_strategy == "resistance" and any(s[1] != float(holdout_value) for s in test_scenarios):
+        raise RuntimeError("Resistance holdout contains an unexpected test scenario")
 
-    assert len(train_scenarios) + len(val_scenarios) + len(test_scenarios) == 171
     return train_scenarios, val_scenarios, test_scenarios
 
-
-def _cache_fingerprint(use_jitter: bool) -> str:
+def _cache_fingerprint(use_jitter: bool, split_strategy: str, holdout_value: float) -> str:
     """Fingerprint source archive metadata and preprocessing settings for cache invalidation."""
     sources = []
     for archive_path in (DATASET_1_ZIP, DATASET_2_ZIP):
@@ -107,9 +137,11 @@ def _cache_fingerprint(use_jitter: bool) -> str:
         else:
             sources.append({"path": archive_path.name, "missing": True})
     payload = {
-        "cache_schema": 2,
+        "cache_schema": 3,
         "sources": sources,
         "use_jitter": bool(use_jitter),
+        "split_strategy": split_strategy,
+        "holdout_value": holdout_value,
         "random_seed": RANDOM_SEED,
         "window_length": WINDOW_LENGTH,
         "d1_fault_index": D1_FAULT_INDEX,
@@ -123,7 +155,9 @@ def _cache_fingerprint(use_jitter: bool) -> str:
 
 def load_and_preprocess_all(
     cache_dir: Optional[Path] = None,
-    use_jitter: bool = True
+    use_jitter: bool = True,
+    split_strategy: str = "scenario",
+    holdout_value: float = 20
 ) -> Tuple[GridSentryDataset, GridSentryDataset, GridSentryDataset, Dict[str, Any]]:
     """
     Loads both Dataset 1 and Dataset 2, extracts 6-channel windows,
@@ -136,9 +170,11 @@ def load_and_preprocess_all(
     cache_file = cache_dir / "preprocessed_dataset.npz"
     summary_file = ARTIFACTS_DIR / "dataset_split_summary.json"
 
-    train_scenarios, val_scenarios, test_scenarios = get_scenario_splits()
+    train_scenarios, val_scenarios, test_scenarios = get_scenario_splits(
+        split_strategy=split_strategy, holdout_value=holdout_value
+    )
 
-    fingerprint = _cache_fingerprint(use_jitter)
+    fingerprint = _cache_fingerprint(use_jitter, split_strategy, holdout_value)
     cache_valid = False
     if cache_file.exists():
         try:
@@ -334,6 +370,8 @@ def load_and_preprocess_all(
         # Save dataset split summary
         split_summary = {
             'total_physical_scenarios': 171,
+            'split_strategy': split_strategy,
+            'holdout_value': holdout_value if split_strategy != 'scenario' else None,
             'train_scenarios_count': len(train_scenarios),
             'val_scenarios_count': len(val_scenarios),
             'test_scenarios_count': len(test_scenarios),
@@ -358,10 +396,14 @@ def load_and_preprocess_all(
 
 def get_dataloaders(
     batch_size: int = BATCH_SIZE,
-    num_workers: int = 0
+    num_workers: int = 0,
+    split_strategy: str = "scenario",
+    holdout_value: float = 20
 ) -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Any]]:
     """Returns PyTorch DataLoaders for train, val, and test splits."""
-    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all()
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all(
+        split_strategy=split_strategy, holdout_value=holdout_value
+    )
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
