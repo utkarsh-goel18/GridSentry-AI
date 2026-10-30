@@ -26,7 +26,7 @@ Other distance values: `150` or `280`.
 
 ```powershell
 python -m ml.train --split-strategy resistance --holdout-value 50
-python -m ml.evaluate --checkpoint artifacts/best_model_resistance_50p0.pt
+python -m ml.evaluate --checkpoint artifacts/best_model_resistance_50.pt
 ```
 
 Valid resistance values: `1`, `50`, or `100` ohms.
