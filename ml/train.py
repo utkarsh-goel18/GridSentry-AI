@@ -149,14 +149,21 @@ def train(
     learning_rate: float = LEARNING_RATE,
     weight_decay: float = WEIGHT_DECAY,
     patience: int = EARLY_STOPPING_PATIENCE,
-    checkpoint_path: Path = BEST_MODEL_PATH
+    checkpoint_path: Path = BEST_MODEL_PATH,
+    split_strategy: str = "scenario",
+    holdout_value: float = 20
 ) -> Dict[str, Any]:
     """Complete training loop with validation, scheduling, and early stopping."""
     set_seed(RANDOM_SEED)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Starting training on device: {device} | Model: {model_name}")
 
-    train_loader, val_loader, test_loader, scaler = get_dataloaders(batch_size=batch_size)
+    if split_strategy != "scenario" and checkpoint_path == BEST_MODEL_PATH:
+        checkpoint_path = ARTIFACTS_DIR / f"best_model_{split_strategy}_{str(holdout_value).replace('.', 'p')}.pt"
+
+    train_loader, val_loader, test_loader, scaler = get_dataloaders(
+        batch_size=batch_size, split_strategy=split_strategy, holdout_value=holdout_value
+    )
 
     model = get_model(model_name, num_classes=NUM_CLASSES).to(device)
     print(f"Model architecture initialized ({model.count_parameters():,} trainable parameters)")
@@ -210,6 +217,8 @@ def train(
                 'val_loss': va_loss,
                 'val_accuracy': va_acc,
                 'model_name': model_name,
+                'split_strategy': split_strategy,
+                'holdout_value': holdout_value,
                 'num_classes': NUM_CLASSES,
                 'in_channels': 6,
                 'window_length': WINDOW_LENGTH,
@@ -246,7 +255,9 @@ def train(
             'weight_decay': weight_decay,
             'num_epochs': num_epochs,
             'early_stopping_patience': patience,
-            'random_seed': RANDOM_SEED
+            'random_seed': RANDOM_SEED,
+            'split_strategy': split_strategy,
+            'holdout_value': holdout_value
         },
         'input_spec': {
             'num_channels': 6,
@@ -275,6 +286,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE, help='Batch size')
     parser.add_argument('--lr', type=float, default=LEARNING_RATE, help='Learning rate')
     parser.add_argument('--checkpoint', type=str, default=None, help='Custom path to save checkpoint')
+    parser.add_argument('--split-strategy', choices=['scenario', 'distance', 'resistance'], default='scenario', help='Scenario split or full-condition holdout')
+    parser.add_argument('--holdout-value', type=float, default=20, help='Held-out distance (km) or resistance (ohm)')
     parser.add_argument('--config-out', type=str, default=None, help='Custom path to save config JSON')
     args = parser.parse_args()
 
@@ -286,5 +299,7 @@ if __name__ == '__main__':
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,
-        checkpoint_path=ckpt
+        checkpoint_path=ckpt,
+        split_strategy=args.split_strategy,
+        holdout_value=args.holdout_value
     )
