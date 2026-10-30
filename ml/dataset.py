@@ -7,6 +7,7 @@ and provides PyTorch DataLoaders.
 
 import io
 import json
+import hashlib
 import re
 import zipfile
 from pathlib import Path
@@ -62,8 +63,9 @@ def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
     """
     Partitions the 171 physical simulation scenarios (distance, resistance, angle)
     into Train (~70%), Val (~15%), Test (~15%), stratified across (dist, rf) operating conditions.
+    Uses a local RNG so calling this function does not mutate global NumPy state.
     """
-    np.random.seed(random_seed)
+    rng = np.random.default_rng(random_seed)
     dists = [20, 150, 280]
     rfs = [1.0, 50.0, 100.0]
     angles = list(range(0, 190, 10))  # 19 angles
@@ -74,7 +76,7 @@ def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
 
     for d in dists:
         for r in rfs:
-            shuffled_angles = np.random.permutation(angles).tolist()
+            shuffled_angles = rng.permutation(angles).tolist()
             # 19 angles per (d, r): 13 train (~68.4%), 3 val (~15.8%), 3 test (~15.8%)
             tr_a = shuffled_angles[:13]
             va_a = shuffled_angles[13:16]
@@ -89,6 +91,34 @@ def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
 
     assert len(train_scenarios) + len(val_scenarios) + len(test_scenarios) == 171
     return train_scenarios, val_scenarios, test_scenarios
+
+
+def _cache_fingerprint(use_jitter: bool) -> str:
+    """Fingerprint source archive metadata and preprocessing settings for cache invalidation."""
+    sources = []
+    for archive_path in (DATASET_1_ZIP, DATASET_2_ZIP):
+        if archive_path.exists():
+            stat = archive_path.stat()
+            sources.append({
+                "path": archive_path.name,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns
+            })
+        else:
+            sources.append({"path": archive_path.name, "missing": True})
+    payload = {
+        "cache_schema": 2,
+        "sources": sources,
+        "use_jitter": bool(use_jitter),
+        "random_seed": RANDOM_SEED,
+        "window_length": WINDOW_LENGTH,
+        "d1_fault_index": D1_FAULT_INDEX,
+        "d2_fault_index": D2_FAULT_INDEX,
+        "pre_fault_samples": PRE_FAULT_SAMPLES,
+        "classes": STANDARD_CLASSES
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def load_and_preprocess_all(
@@ -108,14 +138,28 @@ def load_and_preprocess_all(
 
     train_scenarios, val_scenarios, test_scenarios = get_scenario_splits()
 
+    fingerprint = _cache_fingerprint(use_jitter)
+    cache_valid = False
     if cache_file.exists():
-        print(f"Loading preprocessed dataset from cache: {cache_file}")
-        cached = np.load(cache_file, allow_pickle=True)
-        x_train, y_train = cached['x_train'], cached['y_train']
-        x_val, y_val = cached['x_val'], cached['y_val']
-        x_test, y_test = cached['x_test'], cached['y_test']
-        scaler = json.loads(str(cached['scaler_json']))
+        try:
+            with np.load(cache_file, allow_pickle=False) as cached:
+                cache_valid = (
+                    "cache_fingerprint" in cached.files
+                    and str(cached["cache_fingerprint"].item()) == fingerprint
+                )
+                if cache_valid:
+                    x_train, y_train = cached['x_train'], cached['y_train']
+                    x_val, y_val = cached['x_val'], cached['y_val']
+                    x_test, y_test = cached['x_test'], cached['y_test']
+                    scaler = json.loads(str(cached['scaler_json'].item()))
+        except (OSError, ValueError, KeyError, EOFError):
+            cache_valid = False
+
+    if cache_valid:
+        print(f"Loading validated preprocessed dataset cache: {cache_file}")
     else:
+        if cache_file.exists():
+            print("Preprocessed cache is stale or unreadable; rebuilding it.")
         print("Building preprocessed dataset from raw ZIP archives...")
         # Containers for splits
         raw_splits = {'train': [], 'val': [], 'test': []}
@@ -267,7 +311,8 @@ def load_and_preprocess_all(
             x_train=x_train, y_train=y_train,
             x_val=x_val, y_val=y_val,
             x_test=x_test, y_test=y_test,
-            scaler_json=json.dumps(scaler)
+            scaler_json=json.dumps(scaler),
+            cache_fingerprint=np.asarray(fingerprint)
         )
         print(f"Saved dataset cache to: {cache_file}")
 
