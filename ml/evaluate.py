@@ -138,7 +138,7 @@ def evaluate(
     cm = confusion_matrix(y_true, y_pred, labels=range(NUM_CLASSES))
 
     # Keep condition-holdout artifacts separate from the standard benchmark.
-    split_suffix = "" if split_strategy == "scenario" else f"_{split_strategy}_{str(holdout_value).replace('.', 'p')}"
+    split_suffix = "" if split_strategy == "scenario" else f"_{split_strategy}_{f'{holdout_value:g}'}"
     # Plot confusion matrix
     cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}{split_suffix}.png"
     plot_confusion_matrix(cm, STANDARD_CLASSES, cm_plot_path)
@@ -167,7 +167,7 @@ def evaluate(
     metrics_output_path = Path(metrics_output_path)
     if split_strategy != "scenario" and metrics_output_path == EVALUATION_METRICS_PATH:
         metrics_output_path = metrics_output_path.with_name(
-            f"evaluation_metrics_{split_strategy}_{str(holdout_value).replace('.', 'p')}.json"
+            f"evaluation_metrics_{split_strategy}_{f'{holdout_value:g}'}.json"
         )
     metrics_output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(metrics_output_path, 'w') as f:
