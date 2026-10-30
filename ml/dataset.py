@@ -167,8 +167,19 @@ def load_and_preprocess_all(
     if cache_dir is None:
         cache_dir = ARTIFACTS_DIR / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / "preprocessed_dataset.npz"
-    summary_file = ARTIFACTS_DIR / "dataset_split_summary.json"
+    # Keep artifacts from each evaluation strategy isolated. In particular,
+    # condition-holdout scalers must never replace the standard API scaler.
+    if split_strategy == "scenario":
+        artifact_suffix = ""
+    else:
+        artifact_suffix = f"_{split_strategy}_{float(holdout_value):g}"
+
+    cache_file = cache_dir / f"preprocessed_dataset{artifact_suffix}.npz"
+    summary_file = ARTIFACTS_DIR / f"dataset_split_summary{artifact_suffix}.json"
+    scaler_path = (
+        SCALER_PATH if split_strategy == "scenario"
+        else ARTIFACTS_DIR / f"scaler_params{artifact_suffix}.json"
+    )
 
     train_scenarios, val_scenarios, test_scenarios = get_scenario_splits(
         split_strategy=split_strategy, holdout_value=holdout_value
@@ -354,8 +365,9 @@ def load_and_preprocess_all(
 
         # Save scaler params
         ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SCALER_PATH, 'w') as f:
+        with open(scaler_path, 'w') as f:
             json.dump(scaler, f, indent=2)
+        print(f"Saved scaler parameters to: {scaler_path}")
 
         # Save class mapping
         class_mapping_data = {
