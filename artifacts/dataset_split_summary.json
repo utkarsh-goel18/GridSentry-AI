@@ -1,0 +1,45 @@
+{
+  "total_physical_scenarios": 171,
+  "train_scenarios_count": 117,
+  "val_scenarios_count": 27,
+  "test_scenarios_count": 27,
+  "train_windows": 15960,
+  "val_windows": 1230,
+  "test_windows": 1230,
+  "window_length": 512,
+  "num_channels": 6,
+  "channels": [
+    "Va",
+    "Vb",
+    "Vc",
+    "Ia",
+    "Ib",
+    "Ic"
+  ],
+  "scaler": {
+    "mean": [
+      2439.911079131376,
+      -3713.2831900583546,
+      1273.3722255533098,
+      107.36103485933964,
+      282.51003196381475,
+      -389.8710781106882
+    ],
+    "std": [
+      273858.15026836033,
+      273740.9410004073,
+      275556.9482778043,
+      2541.871226053467,
+      2444.886567711864,
+      2498.8692004146747
+    ],
+    "channels": [
+      "Va",
+      "Vb",
+      "Vc",
+      "Ia",
+      "Ib",
+      "Ic"
+    ]
+  }
+}

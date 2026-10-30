@@ -1,0 +1,41 @@
+{
+  "model_name": "baseline",
+  "parameters_count": 402506,
+  "best_epoch": 10,
+  "best_val_loss": 0.03172764494651702,
+  "best_val_accuracy": 0.9983739837398374,
+  "total_training_time_s": 9.147522687911987,
+  "hyperparameters": {
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "num_epochs": 10,
+    "early_stopping_patience": 5,
+    "random_seed": 42
+  },
+  "input_spec": {
+    "num_channels": 6,
+    "channels": [
+      "Va",
+      "Vb",
+      "Vc",
+      "Ia",
+      "Ib",
+      "Ic"
+    ],
+    "window_length": 512,
+    "sampling_rate_hz": 15360
+  },
+  "classes": [
+    "AG",
+    "BG",
+    "CG",
+    "AB",
+    "BC",
+    "CA",
+    "ABG",
+    "BCG",
+    "CAG",
+    "ABC"
+  ]
+}

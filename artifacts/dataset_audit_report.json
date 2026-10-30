@@ -1,0 +1,255 @@
+{
+  "dataset_1_uncompensated": {
+    "zip_name": "signals (dataset 1).zip",
+    "total_mat_files": 940,
+    "class_counts_raw": {
+      "AT": 94,
+      "ABC": 94,
+      "CA": 94,
+      "BC": 94,
+      "AB": 94,
+      "CAT": 94,
+      "BCT": 94,
+      "ABT": 94,
+      "CT": 94,
+      "BT": 94
+    },
+    "class_counts_standard": {
+      "AG": 94,
+      "ABC": 94,
+      "CA": 94,
+      "BC": 94,
+      "AB": 94,
+      "CAG": 94,
+      "BCG": 94,
+      "ABG": 94,
+      "CG": 94,
+      "BG": 94
+    },
+    "distance_km_counts": {
+      "150": 560,
+      "280": 190,
+      "20": 190
+    },
+    "inception_angle_deg_counts": {
+      "0": 50,
+      "10": 50,
+      "20": 50,
+      "30": 50,
+      "40": 50,
+      "50": 50,
+      "60": 50,
+      "70": 50,
+      "80": 50,
+      "90": 50,
+      "100": 50,
+      "110": 50,
+      "120": 50,
+      "130": 50,
+      "140": 50,
+      "150": 50,
+      "160": 50,
+      "170": 50,
+      "180": 40
+    },
+    "fault_resistance_ohm_counts": {
+      "100.0": 190,
+      "50.0": 180,
+      "1.0": 570
+    },
+    "signal_shapes": {
+      "V_L": [
+        [
+          7681,
+          3
+        ]
+      ],
+      "I_L": [
+        [
+          7681,
+          3
+        ]
+      ]
+    },
+    "sampling_frequencies_hz": [
+      15360
+    ],
+    "fault_time_range_s": [
+      0.42493456249999995,
+      0.42493456249999995
+    ],
+    "has_nans": false,
+    "has_infs": false,
+    "sample_inspections": [
+      {
+        "filename": "sim_Chesf_500_Classifier_LOC3_AT_150_10_100.000.mat",
+        "fault_raw": "AT",
+        "tipo_falta": [
+          "['AT']",
+          "['BT']",
+          "['CT']",
+          "['ABT']",
+          "['BCT']",
+          "['CAT']",
+          "['AB']",
+          "['BC']",
+          "['CA']",
+          "['ABC']"
+        ],
+        "fs": 15360,
+        "real_fault_time": 0.42493456249999995,
+        "v_min": -568916.0378152573,
+        "v_max": 608212.1089228125,
+        "i_min": -1397.0963639211634,
+        "i_max": 1388.138634315481
+      },
+      {
+        "filename": "sim_Chesf_500_Classifier_LOC3_AT_150_110_100.00.mat",
+        "fault_raw": "AT",
+        "tipo_falta": [
+          "['AT']",
+          "['BT']",
+          "['CT']",
+          "['ABT']",
+          "['BCT']",
+          "['CAT']",
+          "['AB']",
+          "['BC']",
+          "['CA']",
+          "['ABC']"
+        ],
+        "fs": 15360,
+        "real_fault_time": 0.42493456249999995,
+        "v_min": -568916.0378152573,
+        "v_max": 608212.1089228125,
+        "i_min": -1428.7104222458565,
+        "i_max": 1530.1347862798439
+      },
+      {
+        "filename": "sim_Chesf_500_Classifier_LOC3_ABC_150_110_100.0.mat",
+        "fault_raw": "ABC",
+        "tipo_falta": [
+          "['AT']",
+          "['BT']",
+          "['CT']",
+          "['ABT']",
+          "['BCT']",
+          "['CAT']",
+          "['AB']",
+          "['BC']",
+          "['CA']",
+          "['ABC']"
+        ],
+        "fs": 15360,
+        "real_fault_time": 0.42493456249999995,
+        "v_min": -568916.0378152028,
+        "v_max": 608212.1089227491,
+        "i_min": -1698.6744998557933,
+        "i_max": 1763.4340135687662
+      }
+    ],
+    "system_characteristics": {
+      "voltage_level_kv": 500,
+      "nominal_frequency_hz": 60,
+      "compensation": "Uncompensated (0%)",
+      "duration_s": 0.5,
+      "num_samples": 7681
+    }
+  },
+  "dataset_2_compensated": {
+    "zip_name": "signals_with_compensation (dataset 2).zip",
+    "fault_classes_found": [
+      "AB",
+      "ABC",
+      "ABG",
+      "AG",
+      "BC",
+      "BCG",
+      "BG",
+      "CA",
+      "CAG",
+      "CG"
+    ],
+    "total_fault_classes": 10,
+    "other_files": [
+      "falta_tempos_disparo.mat"
+    ],
+    "mat_version": "MATLAB v7.3 (HDF5 format)",
+    "array_dimensions_c_order": [
+      19,
+      4,
+      3,
+      3,
+      3,
+      1537
+    ],
+    "dimension_meanings": [
+      "dim 0 (19): Fault inception angle variation (0 to 180 deg in steps of 10 deg)",
+      "dim 1 (4): Series compensation factor (0.4, 0.5, 0.6, 0.7)",
+      "dim 2 (3): Fault resistance Rf (1, 50, 100 ohm)",
+      "dim 3 (3): Fault distance (20 km, 150 km, 280 km)",
+      "dim 4 (3): Phase signals (Phase A, B, C)",
+      "dim 5 (1537): Time samples (0.1 s at fs=15360 Hz)"
+    ],
+    "scenarios_per_class": 684,
+    "total_scenarios_all_classes": 6840,
+    "has_nans": false,
+    "has_infs": false,
+    "sample_ag_stats": {
+      "v_min": -412126.74758147943,
+      "v_max": 412122.865266759,
+      "i_min": -11086.13857928927,
+      "i_max": 18049.351523782614
+    },
+    "system_characteristics": {
+      "voltage_level_kv": 500,
+      "nominal_frequency_hz": 60,
+      "sampling_frequency_hz": 15360,
+      "compensation_rates": [
+        0.4,
+        0.5,
+        0.6,
+        0.7
+      ],
+      "duration_s": 0.1,
+      "num_samples": 1537,
+      "fault_time_s": 0.05
+    }
+  },
+  "cross_dataset_comparison": {
+    "class_overlap": {
+      "common_classes_count": 10,
+      "mapping_d1_to_d2": {
+        "AT": "AG",
+        "BT": "BG",
+        "CT": "CG",
+        "AB": "AB",
+        "BC": "BC",
+        "CA": "CA",
+        "ABT": "ABG",
+        "BCT": "BCG",
+        "CAT": "CAG",
+        "ABC": "ABC"
+      },
+      "classes": [
+        "AG",
+        "BG",
+        "CG",
+        "AB",
+        "BC",
+        "CA",
+        "ABG",
+        "BCG",
+        "CAG",
+        "ABC"
+      ]
+    },
+    "sampling_rate_match": true,
+    "sampling_rate_hz": 15360,
+    "points_per_60hz_cycle": 256,
+    "normal_operation_present_as_separate_class": false,
+    "overload_present_as_separate_class": false,
+    "note_on_steady_state": "Neither dataset contains separate 'Normal' or 'Overload' recording classes. Both datasets model transmission-line faults, with an initial steady-state pre-fault window (t < 0.425s in D1, t < 0.05s in D2) preceding the fault condition.",
+    "pairing_analysis": "Dataset 1 (uncompensated, 940 recordings) and Dataset 2 (series-compensated, 6,840 scenarios) share the exact same Chesf 500 kV transmission line simulation grid across 3 distances (20 km, 150 km, 280 km), 3 fault resistances (1, 50, 100 ohm), and 19 inception angles (0 to 180 degrees in steps of 10 degrees). Dataset 2 adds 4 series compensation levels (40%, 50%, 60%, 70%). To avoid data leakage, physical simulation scenarios sharing the same (distance, resistance) conditions must be kept together in the same train/validation/test split."
+  }
+}

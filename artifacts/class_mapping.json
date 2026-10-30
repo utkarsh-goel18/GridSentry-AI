@@ -1,0 +1,39 @@
+{
+  "standard_classes": [
+    "AG",
+    "BG",
+    "CG",
+    "AB",
+    "BC",
+    "CA",
+    "ABG",
+    "BCG",
+    "CAG",
+    "ABC"
+  ],
+  "class_to_idx": {
+    "AG": 0,
+    "BG": 1,
+    "CG": 2,
+    "AB": 3,
+    "BC": 4,
+    "CA": 5,
+    "ABG": 6,
+    "BCG": 7,
+    "CAG": 8,
+    "ABC": 9
+  },
+  "idx_to_class": {
+    "0": "AG",
+    "1": "BG",
+    "2": "CG",
+    "3": "AB",
+    "4": "BC",
+    "5": "CA",
+    "6": "ABG",
+    "7": "BCG",
+    "8": "CAG",
+    "9": "ABC"
+  },
+  "num_classes": 10
+}

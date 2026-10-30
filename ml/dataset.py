@@ -1,0 +1,335 @@
+"""
+GridSentry AI — Dataset and Preprocessing Pipeline
+Partitions recordings by independent physical simulation scenarios,
+extracts 6-channel waveform windows, normalizes using training data only,
+and provides PyTorch DataLoaders.
+"""
+
+import io
+import json
+import re
+import zipfile
+from pathlib import Path
+from typing import Dict, Any, List, Tuple, Optional
+
+import numpy as np
+import scipy.io
+import h5py
+import torch
+from torch.utils.data import Dataset, DataLoader
+
+from ml.config import (
+    DATASET_1_ZIP,
+    DATASET_2_ZIP,
+    ARTIFACTS_DIR,
+    SCALER_PATH,
+    CLASS_MAPPING_PATH,
+    CONFIG_PATH,
+    STANDARD_CLASSES,
+    CLASS_TO_IDX,
+    IDX_TO_CLASS,
+    RAW_TO_STANDARD_CLASS,
+    WINDOW_LENGTH,
+    D1_FAULT_INDEX,
+    D2_FAULT_INDEX,
+    PRE_FAULT_SAMPLES,
+    RANDOM_SEED,
+    BATCH_SIZE
+)
+
+
+class GridSentryDataset(Dataset):
+    """PyTorch Dataset for 6-channel transmission-line waveform windows."""
+
+    def __init__(self, waveforms: np.ndarray, labels: np.ndarray, metadata: Optional[List[Dict[str, Any]]] = None):
+        """
+        waveforms: shape (N, 6, window_length)
+        labels: shape (N,)
+        metadata: optional list of dicts with scenario info
+        """
+        self.waveforms = torch.from_numpy(waveforms).float()
+        self.labels = torch.from_numpy(labels).long()
+        self.metadata = metadata or []
+
+    def __len__(self) -> int:
+        return len(self.labels)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.waveforms[idx], self.labels[idx]
+
+
+def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
+    """
+    Partitions the 171 physical simulation scenarios (distance, resistance, angle)
+    into Train (~70%), Val (~15%), Test (~15%), stratified across (dist, rf) operating conditions.
+    """
+    np.random.seed(random_seed)
+    dists = [20, 150, 280]
+    rfs = [1.0, 50.0, 100.0]
+    angles = list(range(0, 190, 10))  # 19 angles
+
+    train_scenarios = set()
+    val_scenarios = set()
+    test_scenarios = set()
+
+    for d in dists:
+        for r in rfs:
+            shuffled_angles = np.random.permutation(angles).tolist()
+            # 19 angles per (d, r): 13 train (~68.4%), 3 val (~15.8%), 3 test (~15.8%)
+            tr_a = shuffled_angles[:13]
+            va_a = shuffled_angles[13:16]
+            te_a = shuffled_angles[16:19]
+
+            for a in tr_a:
+                train_scenarios.add((d, r, a))
+            for a in va_a:
+                val_scenarios.add((d, r, a))
+            for a in te_a:
+                test_scenarios.add((d, r, a))
+
+    assert len(train_scenarios) + len(val_scenarios) + len(test_scenarios) == 171
+    return train_scenarios, val_scenarios, test_scenarios
+
+
+def load_and_preprocess_all(
+    cache_dir: Optional[Path] = None,
+    use_jitter: bool = True
+) -> Tuple[GridSentryDataset, GridSentryDataset, GridSentryDataset, Dict[str, Any]]:
+    """
+    Loads both Dataset 1 and Dataset 2, extracts 6-channel windows,
+    splits by scenario, calculates training scaler, and returns Datasets.
+    Uses cached preprocessed .npz if available.
+    """
+    if cache_dir is None:
+        cache_dir = ARTIFACTS_DIR / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / "preprocessed_dataset.npz"
+    summary_file = ARTIFACTS_DIR / "dataset_split_summary.json"
+
+    train_scenarios, val_scenarios, test_scenarios = get_scenario_splits()
+
+    if cache_file.exists():
+        print(f"Loading preprocessed dataset from cache: {cache_file}")
+        cached = np.load(cache_file, allow_pickle=True)
+        x_train, y_train = cached['x_train'], cached['y_train']
+        x_val, y_val = cached['x_val'], cached['y_val']
+        x_test, y_test = cached['x_test'], cached['y_test']
+        scaler = json.loads(str(cached['scaler_json']))
+    else:
+        print("Building preprocessed dataset from raw ZIP archives...")
+        # Containers for splits
+        raw_splits = {'train': [], 'val': [], 'test': []}
+        labels_splits = {'train': [], 'val': [], 'test': []}
+        meta_splits = {'train': [], 'val': [], 'test': []}
+
+        # 1. Process Dataset 2 (Series-Compensated)
+        print("Extracting Dataset 2 recordings...")
+        angles_list = list(range(0, 190, 10))
+        dists_list = [20, 150, 280]
+        rfs_list = [1.0, 50.0, 100.0]
+        comps_list = [0.4, 0.5, 0.6, 0.7]
+
+        with zipfile.ZipFile(DATASET_2_ZIP, 'r') as z2:
+            for cls_name in STANDARD_CLASSES:
+                cls_idx = CLASS_TO_IDX[cls_name]
+                raw_bytes = z2.read(f"signals_with_compensation (dataset 2)/falta_{cls_name}.mat")
+                with h5py.File(io.BytesIO(raw_bytes), 'r') as hf:
+                    v_all = hf[f"V_{cls_name}"][:]  # (19, 4, 3, 3, 3, 1537)
+                    i_all = hf[f"I_{cls_name}"][:]  # (19, 4, 3, 3, 3, 1537)
+
+                    for a_idx, ang in enumerate(angles_list):
+                        for r_idx, rf in enumerate(rfs_list):
+                            for d_idx, dist in enumerate(dists_list):
+                                scenario_key = (dist, rf, ang)
+                                if scenario_key in train_scenarios:
+                                    target_split = 'train'
+                                elif scenario_key in val_scenarios:
+                                    target_split = 'val'
+                                else:
+                                    target_split = 'test'
+
+                                # Iterate over all 4 compensation factors
+                                for c_idx, comp in enumerate(comps_list):
+                                    v_trace = v_all[a_idx, c_idx, r_idx, d_idx, :, :]  # (3, 1537)
+                                    i_trace = i_all[a_idx, c_idx, r_idx, d_idx, :, :]  # (3, 1537)
+                                    sig_6ch = np.vstack([v_trace, i_trace]).astype(np.float32)  # (6, 1537)
+
+                                    # Extract window(s)
+                                    offsets = [-64]
+                                    if target_split == 'train' and use_jitter:
+                                        # Data augmentation for training: slight jitter shifts
+                                        offsets = [-80, -64, -48]
+
+                                    for off in offsets:
+                                        start = D2_FAULT_INDEX + off
+                                        end = start + WINDOW_LENGTH
+                                        if start >= 0 and end <= sig_6ch.shape[1]:
+                                            win = sig_6ch[:, start:end]
+                                            raw_splits[target_split].append(win)
+                                            labels_splits[target_split].append(cls_idx)
+                                            meta_splits[target_split].append({
+                                                'fault': cls_name,
+                                                'distance_km': dist,
+                                                'resistance_ohm': rf,
+                                                'angle_deg': ang,
+                                                'compensation': comp,
+                                                'dataset': 'Dataset 2'
+                                            })
+
+        # 2. Process Dataset 1 (Uncompensated)
+        print("Extracting Dataset 1 recordings...")
+        d1_pattern = re.compile(r'sim_Chesf_500_Classifier_LOC3_([A-Z]+)_(\d+)_(\d+)_([0-9.]+)\.mat')
+        with zipfile.ZipFile(DATASET_1_ZIP, 'r') as z1:
+            for fname in z1.namelist():
+                if not fname.endswith('.mat'):
+                    continue
+                basename = Path(fname).name
+                m = d1_pattern.search(basename)
+                if not m:
+                    continue
+                raw_flt, dist_s, ang_s, rf_s = m.groups()
+                std_flt = RAW_TO_STANDARD_CLASS.get(raw_flt, raw_flt)
+                cls_idx = CLASS_TO_IDX[std_flt]
+                dist = int(dist_s)
+                ang = int(ang_s)
+                rf = float(rf_s)
+
+                scenario_key = (dist, rf, ang)
+                if scenario_key in train_scenarios:
+                    target_split = 'train'
+                elif scenario_key in val_scenarios:
+                    target_split = 'val'
+                else:
+                    target_split = 'test'
+
+                mat = scipy.io.loadmat(io.BytesIO(z1.read(fname)))
+                vl = mat['V_L']  # (7681, 3)
+                il = mat['I_L']  # (7681, 3)
+                sig_6ch = np.vstack([vl.T, il.T]).astype(np.float32)  # (6, 7681)
+
+                offsets = [-64]
+                if target_split == 'train' and use_jitter:
+                    offsets = [-80, -64, -48]
+
+                for off in offsets:
+                    start = D1_FAULT_INDEX + off
+                    end = start + WINDOW_LENGTH
+                    if start >= 0 and end <= sig_6ch.shape[1]:
+                        win = sig_6ch[:, start:end]
+                        raw_splits[target_split].append(win)
+                        labels_splits[target_split].append(cls_idx)
+                        meta_splits[target_split].append({
+                            'fault': std_flt,
+                            'distance_km': dist,
+                            'resistance_ohm': rf,
+                            'angle_deg': ang,
+                            'compensation': 0.0,
+                            'dataset': 'Dataset 1'
+                        })
+
+        # Convert to numpy arrays
+        x_train_raw = np.array(raw_splits['train'], dtype=np.float32)
+        y_train = np.array(labels_splits['train'], dtype=np.int64)
+        x_val_raw = np.array(raw_splits['val'], dtype=np.float32)
+        y_val = np.array(labels_splits['val'], dtype=np.int64)
+        x_test_raw = np.array(raw_splits['test'], dtype=np.float32)
+        y_test = np.array(labels_splits['test'], dtype=np.int64)
+
+        print(f"Extracted windows — Train: {len(y_train)}, Val: {len(y_val)}, Test: {len(y_test)}")
+
+        # 3. Calculate normalization parameters STRICTLY on training set
+        print("Computing training set scaler parameters...")
+        # x_train_raw shape: (N, 6, L) -> compute per channel across all samples and time steps
+        # axes: (0, 2)
+        ch_means = np.mean(x_train_raw, axis=(0, 2), dtype=np.float64)  # (6,)
+        ch_stds = np.std(x_train_raw, axis=(0, 2), dtype=np.float64)    # (6,)
+
+        # Protect against potential zero std
+        ch_stds = np.where(ch_stds < 1e-6, 1.0, ch_stds)
+
+        scaler = {
+            'mean': [float(m) for m in ch_means],
+            'std': [float(s) for s in ch_stds],
+            'channels': ["Va", "Vb", "Vc", "Ia", "Ib", "Ic"]
+        }
+
+        # Apply normalization
+        mean_b = ch_means[None, :, None].astype(np.float32)
+        std_b = ch_stds[None, :, None].astype(np.float32)
+
+        x_train = (x_train_raw - mean_b) / std_b
+        x_val = (x_val_raw - mean_b) / std_b
+        x_test = (x_test_raw - mean_b) / std_b
+
+        # Save cache and scaler
+        np.savez_compressed(
+            cache_file,
+            x_train=x_train, y_train=y_train,
+            x_val=x_val, y_val=y_val,
+            x_test=x_test, y_test=y_test,
+            scaler_json=json.dumps(scaler)
+        )
+        print(f"Saved dataset cache to: {cache_file}")
+
+        # Save scaler params
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        with open(SCALER_PATH, 'w') as f:
+            json.dump(scaler, f, indent=2)
+
+        # Save class mapping
+        class_mapping_data = {
+            'standard_classes': STANDARD_CLASSES,
+            'class_to_idx': CLASS_TO_IDX,
+            'idx_to_class': IDX_TO_CLASS,
+            'num_classes': len(STANDARD_CLASSES)
+        }
+        with open(CLASS_MAPPING_PATH, 'w') as f:
+            json.dump(class_mapping_data, f, indent=2)
+
+        # Save dataset split summary
+        split_summary = {
+            'total_physical_scenarios': 171,
+            'train_scenarios_count': len(train_scenarios),
+            'val_scenarios_count': len(val_scenarios),
+            'test_scenarios_count': len(test_scenarios),
+            'train_windows': int(len(y_train)),
+            'val_windows': int(len(y_val)),
+            'test_windows': int(len(y_test)),
+            'window_length': WINDOW_LENGTH,
+            'num_channels': 6,
+            'channels': scaler['channels'],
+            'scaler': scaler
+        }
+        with open(summary_file, 'w') as f:
+            json.dump(split_summary, f, indent=2)
+        print(f"Saved split summary to: {summary_file}")
+
+    train_ds = GridSentryDataset(x_train, y_train)
+    val_ds = GridSentryDataset(x_val, y_val)
+    test_ds = GridSentryDataset(x_test, y_test)
+
+    return train_ds, val_ds, test_ds, scaler
+
+
+def get_dataloaders(
+    batch_size: int = BATCH_SIZE,
+    num_workers: int = 0
+) -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Any]]:
+    """Returns PyTorch DataLoaders for train, val, and test splits."""
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all()
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+    return train_loader, val_loader, test_loader, scaler
+
+
+if __name__ == '__main__':
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all()
+    print("Dataset verification:")
+    print(f"  Train samples: {len(train_ds)}, shape: {train_ds[0][0].shape}")
+    print(f"  Val samples:   {len(val_ds)}, shape: {val_ds[0][0].shape}")
+    print(f"  Test samples:  {len(test_ds)}, shape: {test_ds[0][0].shape}")
+    print("  Scaler Means:", [f"{m:.2f}" for m in scaler['mean']])
+    print("  Scaler Stds: ", [f"{s:.2f}" for s in scaler['std']])
