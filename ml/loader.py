@@ -37,6 +37,25 @@ class MatlabSignalLoader:
         self.d2_zip = Path(d2_zip_path or DATASET_2_ZIP)
 
     @staticmethod
+    def _as_three_phase_time(array: np.ndarray, variable_name: str) -> np.ndarray:
+        """Return a finite float32 matrix in (3 phases, time) order."""
+        values = np.asarray(array)
+        if values.ndim != 2:
+            raise ValueError(f"{variable_name} must be 2-D; received shape {values.shape}.")
+        if values.shape[0] == 3:
+            oriented = values
+        elif values.shape[1] == 3:
+            oriented = values.T
+        else:
+            raise ValueError(
+                f"{variable_name} must have exactly 3 phase columns or rows; received {values.shape}."
+            )
+        oriented = np.asarray(oriented, dtype=np.float32)
+        if not np.isfinite(oriented).all():
+            raise ValueError(f"{variable_name} contains NaN or infinite values.")
+        return oriented
+
+    @staticmethod
     def parse_filename_metadata(filename: str) -> Dict[str, Any]:
         """
         Parses simulation parameters from filename format:
@@ -115,8 +134,13 @@ class MatlabSignalLoader:
             if 'RealFaultTime' in mat_obj:
                 meta['fault_time'] = float(mat_obj['RealFaultTime'][0, 0])
 
-            # vl is (N, 3), il is (N, 3). Stack as (6, N)
-            signal_6ch = np.vstack([vl.T, il.T]).astype(np.float32)
+            voltage = cls._as_three_phase_time(vl, "voltage")
+            current = cls._as_three_phase_time(il, "current")
+            if voltage.shape != current.shape:
+                raise ValueError(
+                    f"Voltage/current dimensions disagree: {voltage.shape} vs {current.shape}."
+                )
+            signal_6ch = np.vstack([voltage, current]).astype(np.float32, copy=False)
             return signal_6ch, meta
 
         elif mat_format == "v7_3":
@@ -137,9 +161,9 @@ class MatlabSignalLoader:
 
             v_ds = mat_obj[vk]
             i_ds = mat_obj[ik]
-            # If multi-dimensional, extract default scenario (first)
+            if v_ds.shape != i_ds.shape:
+                raise ValueError(f"{vk}/{ik} dimensions disagree: {v_ds.shape} vs {i_ds.shape}.")
             if v_ds.ndim == 6:
-                # shape: (19, 4, 3, 3, 3, 1537) -> extract (3, 1537)
                 v_slice = v_ds[0, 0, 0, 0, :, :]
                 i_slice = i_ds[0, 0, 0, 0, :, :]
             elif v_ds.ndim == 2:
@@ -148,12 +172,11 @@ class MatlabSignalLoader:
             else:
                 raise ValueError(f"Unexpected dimensionality for {vk}: {v_ds.shape}")
 
-            # Ensure (3, N)
-            if v_slice.shape[0] != 3 and v_slice.shape[1] == 3:
-                v_slice = v_slice.T
-                i_slice = i_slice.T
-
-            signal_6ch = np.vstack([v_slice, i_slice]).astype(np.float32)
+            voltage = cls._as_three_phase_time(v_slice, vk)
+            current = cls._as_three_phase_time(i_slice, ik)
+            if voltage.shape != current.shape:
+                raise ValueError(f"Voltage/current slice dimensions disagree: {voltage.shape} vs {current.shape}.")
+            signal_6ch = np.vstack([voltage, current]).astype(np.float32, copy=False)
             return signal_6ch, meta
 
         else:
@@ -203,10 +226,15 @@ class MatlabSignalLoader:
         with h5py.File(io.BytesIO(raw_bytes), 'r') as hf:
             vk = f"V_{std_fault}"
             ik = f"I_{std_fault}"
+            if hf[vk].shape != hf[ik].shape:
+                raise ValueError(f"{vk}/{ik} dimensions disagree.")
             v_slice = hf[vk][angle_idx, comp_idx, rf_idx, dist_idx, :, :]
             i_slice = hf[ik][angle_idx, comp_idx, rf_idx, dist_idx, :, :]
-
-            signal_6ch = np.vstack([v_slice, i_slice]).astype(np.float32)
+            voltage = self._as_three_phase_time(v_slice, vk)
+            current = self._as_three_phase_time(i_slice, ik)
+            if voltage.shape != current.shape:
+                raise ValueError("Voltage/current sample dimensions disagree.")
+            signal_6ch = np.vstack([voltage, current]).astype(np.float32, copy=False)
 
         angles = list(range(0, 190, 10))
         comps = [0.4, 0.5, 0.6, 0.7]
@@ -237,6 +265,13 @@ class MatlabSignalLoader:
         Extracts a consistent window of shape (6, window_length) around fault inception.
         Pads with edge values if window exceeds boundaries.
         """
+        signal_6ch = np.asarray(signal_6ch)
+        if signal_6ch.ndim != 2 or signal_6ch.shape[0] != 6:
+            raise ValueError("signal_6ch must have shape (6, N).")
+        if signal_6ch.shape[1] == 0 or window_length <= 0 or pre_fault < 0:
+            raise ValueError("Signal and window dimensions must be positive.")
+        if not np.isfinite(signal_6ch).all():
+            raise ValueError("signal_6ch contains NaN or infinite values.")
         start = fault_index - pre_fault
         end = start + window_length
         total_len = signal_6ch.shape[1]
@@ -251,6 +286,8 @@ class MatlabSignalLoader:
         valid_end = min(total_len, end)
 
         chunk = signal_6ch[:, valid_start:valid_end]
+        if chunk.shape[1] == 0:
+            raise ValueError("Requested window does not overlap the supplied signal.")
         if pad_left > 0 or pad_right > 0:
             chunk = np.pad(chunk, ((0, 0), (pad_left, pad_right)), mode='edge')
         return chunk
