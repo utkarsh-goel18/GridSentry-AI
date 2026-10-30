@@ -159,7 +159,7 @@ def train(
     print(f"Starting training on device: {device} | Model: {model_name}")
 
     if split_strategy != "scenario" and checkpoint_path == BEST_MODEL_PATH:
-        checkpoint_path = ARTIFACTS_DIR / f"best_model_{split_strategy}_{str(holdout_value).replace('.', 'p')}.pt"
+        checkpoint_path = ARTIFACTS_DIR / f"best_model_{split_strategy}_{f'{holdout_value:g}'}.pt"
 
     train_loader, val_loader, test_loader, scaler = get_dataloaders(
         batch_size=batch_size, split_strategy=split_strategy, holdout_value=holdout_value
@@ -238,7 +238,7 @@ def train(
     print(f"Training completed in {total_time:.1f}s. Best Val Loss: {best_val_loss:.4f}, Val Acc: {best_val_acc*100:.2f}%")
 
     # Keep condition-holdout artifacts separate from the standard benchmark.
-    split_suffix = "" if split_strategy == "scenario" else f"_{split_strategy}_{str(holdout_value).replace('.', 'p')}"
+    split_suffix = "" if split_strategy == "scenario" else f"_{split_strategy}_{f'{holdout_value:g}'}"
     # Plot training curves
     plot_path = FIGURES_DIR / f"training_history_{model_name}{split_suffix}.png"
     plot_training_curves(history, plot_path)
@@ -270,7 +270,7 @@ def train(
         'classes': STANDARD_CLASSES
     }
     config_path = CONFIG_PATH if split_strategy == 'scenario' else CONFIG_PATH.with_name(
-        f"config_{split_strategy}_{str(holdout_value).replace('.', 'p')}.json"
+        f"config_{split_strategy}_{f'{holdout_value:g}'}.json"
     )
     with open(config_path, 'w') as f:
         json.dump(config_data, f, indent=2)
