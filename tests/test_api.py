@@ -1,13 +1,15 @@
 """
 GridSentry AI — API contract tests.
 """
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as test_client:
+    with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
 
 def test_health_reports_actual_model_state(client):
@@ -55,5 +57,14 @@ def test_predict_rejects_ambiguous_long_waveform(client):
 def test_predict_rejects_non_finite_waveform(client):
     waveform = [[0.0] * 512 for _ in range(6)]
     waveform[0][0] = float("nan")
-    response = client.post("/predict", json={"waveform": waveform})
+
+    response = client.post(
+        "/predict",
+        content=json.dumps(
+            {"waveform": waveform},
+            allow_nan=True
+        ),
+        headers={"Content-Type": "application/json"},
+    )
+
     assert response.status_code == 422

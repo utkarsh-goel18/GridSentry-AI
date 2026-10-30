@@ -6,7 +6,9 @@ import json
 from contextlib import asynccontextmanager
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.schemas import (
@@ -39,6 +41,25 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError
+):
+    errors = [
+        {
+            "loc": error.get("loc", []),
+            "msg": error.get("msg", "Invalid input"),
+            "type": error.get("type", "validation_error"),
+        }
+        for error in exc.errors()
+    ]
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": errors}
+    )
 
 # Restrict origins through GRID_SENTY_CORS_ORIGINS in deployment if the UI is hosted elsewhere.
 app.add_middleware(
