@@ -72,7 +72,9 @@ def plot_confusion_matrix(cm: np.ndarray, class_names: list, output_path: Path):
 def evaluate(
     checkpoint_path: Path = BEST_MODEL_PATH,
     metrics_output_path: Path = EVALUATION_METRICS_PATH,
-    batch_size: int = BATCH_SIZE
+    batch_size: int = BATCH_SIZE,
+    split_strategy: str = None,
+    holdout_value: float = None
 ) -> Dict[str, Any]:
     """Runs evaluation on held-out test data and saves metrics."""
     checkpoint_path = Path(checkpoint_path)
@@ -84,11 +86,15 @@ def evaluate(
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
     model_name = checkpoint.get('model_name', '1d_cnn')
+    split_strategy = split_strategy or checkpoint.get('split_strategy', 'scenario')
+    holdout_value = holdout_value if holdout_value is not None else checkpoint.get('holdout_value', 20)
     model = get_model(model_name, num_classes=NUM_CLASSES).to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    _, _, test_loader, scaler = get_dataloaders(batch_size=batch_size)
+    _, _, test_loader, scaler = get_dataloaders(
+        batch_size=batch_size, split_strategy=split_strategy, holdout_value=holdout_value
+    )
 
     all_preds = []
     all_targets = []
@@ -131,12 +137,16 @@ def evaluate(
     # Confusion matrix
     cm = confusion_matrix(y_true, y_pred, labels=range(NUM_CLASSES))
 
+    # Keep condition-holdout artifacts separate from the standard benchmark.
+    split_suffix = "" if split_strategy == "scenario" else f"_{split_strategy}_{f'{holdout_value:g}'}"
     # Plot confusion matrix
-    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}.png"
+    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}{split_suffix}.png"
     plot_confusion_matrix(cm, STANDARD_CLASSES, cm_plot_path)
 
     metrics_result = {
         'model_name': model_name,
+        'split_strategy': split_strategy,
+        'holdout_value': holdout_value if split_strategy != 'scenario' else None,
         'checkpoint_path': str(checkpoint_path),
         'best_epoch': int(checkpoint.get('epoch', 0)),
         'val_loss': float(checkpoint.get('val_loss', 0.0)),
@@ -153,8 +163,12 @@ def evaluate(
         'confusion_matrix': cm.tolist()
     }
 
-    # Save metrics JSON
+    # Save metrics JSON without overwriting the standard benchmark result.
     metrics_output_path = Path(metrics_output_path)
+    if split_strategy != "scenario" and metrics_output_path == EVALUATION_METRICS_PATH:
+        metrics_output_path = metrics_output_path.with_name(
+            f"evaluation_metrics_{split_strategy}_{f'{holdout_value:g}'}.json"
+        )
     metrics_output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(metrics_output_path, 'w') as f:
         json.dump(metrics_result, f, indent=2)
@@ -181,6 +195,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Evaluate GridSentry AI model on test set")
     parser.add_argument('--checkpoint', type=str, default=str(BEST_MODEL_PATH), help='Path to checkpoint')
     parser.add_argument('--output', type=str, default=str(EVALUATION_METRICS_PATH), help='Metrics output JSON')
+    parser.add_argument('--split-strategy', choices=['scenario', 'distance', 'resistance'], default=None, help='Override checkpoint split strategy')
+    parser.add_argument('--holdout-value', type=float, default=None, help='Override held-out distance or resistance')
     args = parser.parse_args()
 
-    evaluate(checkpoint_path=args.checkpoint, metrics_output_path=args.output)
+    evaluate(
+        checkpoint_path=args.checkpoint,
+        metrics_output_path=args.output,
+        split_strategy=args.split_strategy,
+        holdout_value=args.holdout_value
+    )
