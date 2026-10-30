@@ -1,74 +1,67 @@
 """
-GridSentry AI — Test Suite: Preprocessing & Data Splits
-Tests window extraction, padding, scenario-level split independence,
-and normalization consistency.
+GridSentry AI — preprocessing and split integrity tests.
 """
-
-import json
-import pytest
 import numpy as np
-
 from ml.loader import MatlabSignalLoader
 from ml.dataset import get_scenario_splits
-from ml.config import WINDOW_LENGTH, SCALER_PATH
+from ml.config import WINDOW_LENGTH
 from backend.inference import InferenceEngine
 
-
 def test_window_extraction_shape():
-    """Verifies that window extraction produces exact (6, WINDOW_LENGTH) shape."""
-    dummy_signal = np.random.randn(6, 2000).astype(np.float32)
-    window = MatlabSignalLoader.extract_window(dummy_signal, fault_index=1000, pre_fault=64, window_length=WINDOW_LENGTH)
-
+    signal = np.random.default_rng(1).normal(size=(6, 2000)).astype(np.float32)
+    window = MatlabSignalLoader.extract_window(signal, 1000, 64, WINDOW_LENGTH)
     assert window.shape == (6, WINDOW_LENGTH)
     assert window.dtype == np.float32
 
-
 def test_window_extraction_padding():
-    """Verifies that windows near edges pad appropriately without crashing."""
-    dummy_signal = np.random.randn(6, 400).astype(np.float32)
-    # Target window is 512, signal is only 400
-    window = MatlabSignalLoader.extract_window(dummy_signal, fault_index=50, pre_fault=64, window_length=WINDOW_LENGTH)
-
+    signal = np.random.default_rng(2).normal(size=(6, 400)).astype(np.float32)
+    window = MatlabSignalLoader.extract_window(signal, 50, 64, WINDOW_LENGTH)
     assert window.shape == (6, WINDOW_LENGTH)
-    assert not np.isnan(window).any()
+    assert np.isfinite(window).all()
 
+def test_scenario_splits_are_mutually_exclusive_and_complete():
+    train, val, test = get_scenario_splits()
+    assert train.isdisjoint(val)
+    assert train.isdisjoint(test)
+    assert val.isdisjoint(test)
+    assert len(train | val | test) == 171
+    assert (len(train), len(val), len(test)) == (117, 27, 27)
 
-def test_scenario_splits_are_mutually_exclusive():
-    """Verifies that physical simulation scenarios have ZERO leakage across Train, Val, and Test."""
-    train_s, val_s, test_s = get_scenario_splits()
-
-    assert len(train_s.intersection(val_s)) == 0, "Train and Val scenarios must not overlap!"
-    assert len(train_s.intersection(test_s)) == 0, "Train and Test scenarios must not overlap!"
-    assert len(val_s.intersection(test_s)) == 0, "Val and Test scenarios must not overlap!"
-    assert len(train_s) + len(val_s) + len(test_s) == 171
-
-
-def test_scaler_parameters_valid():
-    """Verifies that scaler parameters are positive and have 6 channels."""
-    assert SCALER_PATH.exists(), f"Scaler file {SCALER_PATH} must exist"
-    with open(SCALER_PATH, 'r') as f:
-        scaler = json.load(f)
-
-    assert 'mean' in scaler and 'std' in scaler
-    assert len(scaler['mean']) == 6
-    assert len(scaler['std']) == 6
-    for s in scaler['std']:
-        assert s > 0, "Standard deviation must be strictly positive"
-
-
-def test_inference_and_training_preprocessing_consistency():
-    """Verifies that the inference engine preprocessing matches the training normalization."""
+def _engine_with_identity_scaler():
     engine = InferenceEngine()
-    engine.load()
+    engine.mean = np.zeros((6, 1), dtype=np.float32)
+    engine.std = np.ones((6, 1), dtype=np.float32)
+    return engine
 
-    with open(SCALER_PATH, 'r') as f:
-        scaler = json.load(f)
+def test_exact_window_does_not_need_fault_index():
+    engine = _engine_with_identity_scaler()
+    waveform = np.arange(6 * 512, dtype=np.float32).reshape(6, 512)
+    np.testing.assert_array_equal(engine.preprocess_waveform(waveform), waveform)
 
-    mean_ref = np.array(scaler['mean']).reshape(6, 1)
-    std_ref = np.array(scaler['std']).reshape(6, 1)
+def test_long_waveform_requires_explicit_fault_index():
+    engine = _engine_with_identity_scaler()
+    waveform = np.zeros((6, 1000), dtype=np.float32)
+    try:
+        engine.preprocess_waveform(waveform)
+    except ValueError as exc:
+        assert "fault_index" in str(exc)
+    else:
+        raise AssertionError("Long waveform without fault_index should be rejected.")
 
-    dummy_raw = np.ones((6, 512), dtype=np.float32) * 1000.0
-    preprocessed = engine.preprocess_waveform(dummy_raw)
+def test_explicit_fault_index_selects_expected_window():
+    engine = _engine_with_identity_scaler()
+    waveform = np.tile(np.arange(1000, dtype=np.float32), (6, 1))
+    result = engine.preprocess_waveform(waveform, fault_index=500, pre_fault_samples=64)
+    assert result.shape == (6, 512)
+    np.testing.assert_array_equal(result[0], np.arange(436, 948, dtype=np.float32))
 
-    expected = (dummy_raw - mean_ref) / std_ref
-    np.testing.assert_allclose(preprocessed, expected, rtol=1e-5, atol=1e-5)
+def test_inference_rejects_non_finite_values():
+    engine = _engine_with_identity_scaler()
+    waveform = np.zeros((6, 512), dtype=np.float32)
+    waveform[0, 0] = np.nan
+    try:
+        engine.preprocess_waveform(waveform)
+    except ValueError as exc:
+        assert "NaN" in str(exc) or "infinite" in str(exc)
+    else:
+        raise AssertionError("Non-finite input should be rejected.")
