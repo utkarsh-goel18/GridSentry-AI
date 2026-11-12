@@ -35,6 +35,7 @@ from ml.config import (
 from torch.utils.data import DataLoader
 from ml.dataset import load_and_preprocess_all
 from ml.model import get_model
+from ml.calibration import fit_temperature, write_calibration
 
 
 def plot_confusion_matrix(cm: np.ndarray, class_names: list, output_path: Path):
@@ -168,12 +169,33 @@ def evaluate(
     model.eval()
 
     train_ds, val_ds, test_ds, scaler = load_and_preprocess_all(split_strategy=split_strategy, write_shared_artifacts=write_shared_artifacts)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
     integrity_report = _split_integrity_report(train_ds, val_ds, test_ds)
+
+    # Fit calibration exclusively on the validation partition.
+    val_logits = []
+    val_targets = []
+    with torch.inference_mode():
+        for waveforms, labels in val_loader:
+            val_logits.append(model(waveforms.to(device)).cpu())
+            val_targets.append(labels.cpu())
+    fitted_calibration = fit_temperature(torch.cat(val_logits), torch.cat(val_targets))
+    calibration_path = Path(metrics_output_path).with_name(
+        "calibration.json" if Path(metrics_output_path).name == EVALUATION_METRICS_PATH.name
+        else f"calibration_{Path(metrics_output_path).stem.removeprefix('evaluation_metrics_')}.json"
+    )
+    calibration_artifact = write_calibration(
+        calibration_path, checkpoint_path, split_strategy, fitted_calibration
+    )
+    temperature = calibration_artifact["temperature"]
+    print(f"Validation-fitted temperature: {temperature:.4f}")
+    print(f"Saved calibration artifact: {calibration_path}")
 
     all_preds = []
     all_targets = []
     all_probs = []
+    all_calibrated_probs = []
 
     print(f"Running inference on {len(test_loader.dataset)} held-out test samples...")
     with torch.no_grad():
@@ -181,11 +203,13 @@ def evaluate(
             waveforms = waveforms.to(device)
             logits = model(waveforms)
             probs = torch.softmax(logits, dim=1).cpu().numpy()
+            calibrated_probs = torch.softmax(logits / temperature, dim=1).cpu().numpy()
             preds = np.argmax(probs, axis=1)
 
             all_preds.extend(preds)
             all_targets.extend(labels.numpy())
             all_probs.extend(probs)
+            all_calibrated_probs.extend(calibrated_probs)
 
     y_true = np.array(all_targets)
     y_pred = np.array(all_preds)
@@ -235,7 +259,9 @@ def evaluate(
         'split_strategy': split_strategy,
         'evaluation_scope': 'same-benchmark simulated scenarios; not external-grid validation',
         'split_integrity': integrity_report,
-        'confidence_diagnostics': _confidence_report(np.asarray(all_probs), y_true),
+        'confidence_diagnostics_raw': _confidence_report(np.asarray(all_probs), y_true),
+        'confidence_diagnostics_calibrated': _confidence_report(np.asarray(all_calibrated_probs), y_true),
+        'calibration': calibration_artifact,
         'per_class_metrics': per_class_metrics,
         'confusion_matrix': cm.tolist()
     }
@@ -254,7 +280,8 @@ def evaluate(
     print(f"Overall Accuracy:  {acc * 100:.2f}%")
     print(f"Scenario split disjoint: {integrity_report['scenario_disjoint']}")
     print(f"Exact windows disjoint:  {integrity_report['exact_windows_disjoint']}")
-    print(f"Mean max probability:    {metrics_result['confidence_diagnostics']['mean_max_probability']:.6f}")
+    print(f"Mean raw max probability:        {metrics_result['confidence_diagnostics_raw']['mean_max_probability']:.6f}")
+    print(f"Mean calibrated max probability: {metrics_result['confidence_diagnostics_calibrated']['mean_max_probability']:.6f}")
     print("NOTE: This is an in-benchmark scenario split, not external-grid validation.")
     print(f"Macro-F1 Score:    {f1_macro * 100:.2f}%")
     print(f"Weighted-F1 Score: {f1_weighted * 100:.2f}%")
