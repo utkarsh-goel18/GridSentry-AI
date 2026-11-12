@@ -154,6 +154,12 @@ def evaluate(
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Loading checkpoint: {checkpoint_path} on {device}...")
     checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint_strategy = checkpoint.get('split_strategy', 'random')
+    if checkpoint_strategy != split_strategy:
+        raise ValueError(
+            f"Checkpoint was trained with split strategy '{checkpoint_strategy}', "
+            f"but evaluation requested '{split_strategy}'."
+        )
 
     model_name = checkpoint.get('model_name', '1d_cnn')
     model = get_model(model_name, num_classes=NUM_CLASSES).to(device)
