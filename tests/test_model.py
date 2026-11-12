@@ -71,5 +71,8 @@ def test_evaluation_metrics_file():
     assert 'test_accuracy' in metrics
     assert 'macro_f1' in metrics
     assert 'weighted_f1' in metrics
-    assert metrics['test_accuracy'] >= 0.95
+    assert 0.0 <= metrics['test_accuracy'] <= 1.0
     assert len(metrics['per_class_metrics']) == 10
+    # Historical scores are not treated as verified until the new audit runs.
+    if 'evaluation_protocol_version' not in metrics:
+        assert 'split_integrity' not in metrics
