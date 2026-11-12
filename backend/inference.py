@@ -16,7 +16,7 @@ from ml.config import (
 )
 from ml.model import get_model
 from ml.loader import MatlabSignalLoader
-from ml.calibration import checkpoint_sha256
+from ml.calibration import checkpoint_sha256, calibration_path_for_checkpoint
 
 
 FAULT_DESCRIPTIONS: Dict[str, str] = {
@@ -78,7 +78,7 @@ class InferenceEngine:
         if not np.isfinite(mean).all() or not np.isfinite(std).all() or np.any(std <= 0):
             raise ValueError("Scaler values must be finite and standard deviations positive.")
 
-        calibration_path = ARTIFACTS_DIR / "calibration.json"
+        calibration_path = calibration_path_for_checkpoint(self.checkpoint_path, ARTIFACTS_DIR)
         temperature = 1.0
         calibration_metadata = {"available": False, "reason": "Calibration artifact not found."}
         if calibration_path.exists():
