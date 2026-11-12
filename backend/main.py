@@ -94,6 +94,13 @@ def _read_evaluation_summary():
         required = ("test_accuracy", "macro_f1", "weighted_f1", "best_epoch", "val_loss")
         if any(key not in data or data[key] is None for key in required):
             return None
+        # Legacy metrics without a reproducible split-integrity audit must not
+        # be presented as validated performance in the dashboard.
+        integrity = data.get("split_integrity")
+        if not data.get("evaluation_protocol_version") or not isinstance(integrity, dict):
+            return None
+        if not integrity.get("scenario_disjoint") or not integrity.get("exact_windows_disjoint"):
+            return None
         values = [float(data[k]) for k in required if k != "best_epoch"]
         if not all(np.isfinite(value) for value in values):
             return None
