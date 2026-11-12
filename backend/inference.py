@@ -12,10 +12,11 @@ import torch
 
 from ml.config import (
     BEST_MODEL_PATH, SCALER_PATH, DATASET_1_ZIP, STANDARD_CLASSES,
-    WINDOW_LENGTH, D1_FAULT_INDEX, PRE_FAULT_SAMPLES
+    WINDOW_LENGTH, D1_FAULT_INDEX, PRE_FAULT_SAMPLES, ARTIFACTS_DIR
 )
 from ml.model import get_model
 from ml.loader import MatlabSignalLoader
+from ml.calibration import checkpoint_sha256
 
 
 FAULT_DESCRIPTIONS: Dict[str, str] = {
@@ -42,6 +43,8 @@ class InferenceEngine:
         self.std: Optional[np.ndarray] = None
         self.classes: List[str] = list(STANDARD_CLASSES)
         self.model_metadata: Dict[str, Any] = {}
+        self.temperature = 1.0
+        self.calibration_metadata: Dict[str, Any] = {"available": False, "reason": "Calibration artifact not found."}
         self.loader = MatlabSignalLoader()
         self._available_samples_cache: Optional[List[Dict[str, Any]]] = None
 
@@ -75,7 +78,35 @@ class InferenceEngine:
         if not np.isfinite(mean).all() or not np.isfinite(std).all() or np.any(std <= 0):
             raise ValueError("Scaler values must be finite and standard deviations positive.")
 
+        calibration_path = ARTIFACTS_DIR / "calibration.json"
+        temperature = 1.0
+        calibration_metadata = {"available": False, "reason": "Calibration artifact not found."}
+        if calibration_path.exists():
+            try:
+                calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+                expected_hash = checkpoint_sha256(self.checkpoint_path)
+                candidate = float(calibration["temperature"])
+                if calibration.get("checkpoint_sha256") != expected_hash:
+                    calibration_metadata = {"available": False, "reason": "Calibration belongs to a different checkpoint."}
+                elif calibration.get("fit_source") != "validation_partition_only" or calibration.get("test_partition_used_for_fitting") is not False:
+                    calibration_metadata = {"available": False, "reason": "Calibration provenance is not valid."}
+                elif not np.isfinite(candidate) or not 0.05 <= candidate <= 20.0:
+                    calibration_metadata = {"available": False, "reason": "Calibration temperature is invalid."}
+                else:
+                    temperature = candidate
+                    calibration_metadata = {
+                        "available": True,
+                        "method": calibration.get("method"),
+                        "temperature": candidate,
+                        "split_strategy": calibration.get("split_strategy"),
+                        "validation_samples": calibration.get("validation_samples"),
+                    }
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                calibration_metadata = {"available": False, "reason": "Calibration artifact could not be validated."}
+
         self.model = model
+        self.temperature = temperature
+        self.calibration_metadata = calibration_metadata
         self.scaler = scaler
         self.mean = mean.reshape(6, 1)
         self.std = std.reshape(6, 1)
@@ -163,7 +194,9 @@ class InferenceEngine:
 
         tensor = torch.from_numpy(processed).unsqueeze(0).to(self.device)
         with torch.inference_mode():
-            probabilities = torch.softmax(self.model(tensor), dim=1).cpu().squeeze(0).numpy()
+            logits = self.model(tensor)
+            raw_probabilities = torch.softmax(logits, dim=1).cpu().squeeze(0).numpy()
+            probabilities = torch.softmax(logits / self.temperature, dim=1).cpu().squeeze(0).numpy()
 
         index = int(np.argmax(probabilities))
         elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -171,6 +204,9 @@ class InferenceEngine:
             "predicted_fault": self.classes[index],
             "fault_description": FAULT_DESCRIPTIONS.get(self.classes[index], self.classes[index]),
             "confidence": round(float(probabilities[index]), 4),
+            "raw_confidence": round(float(raw_probabilities[index]), 4),
+            "confidence_is_calibrated": bool(self.calibration_metadata.get("available")),
+            "calibration": self.calibration_metadata,
             "class_probabilities": {
                 label: round(float(probabilities[i]), 6)
                 for i, label in enumerate(self.classes)
