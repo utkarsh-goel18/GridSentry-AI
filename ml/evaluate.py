@@ -143,7 +143,8 @@ def _confidence_report(probabilities, targets):
 def evaluate(
     checkpoint_path: Path = BEST_MODEL_PATH,
     metrics_output_path: Path = EVALUATION_METRICS_PATH,
-    batch_size: int = BATCH_SIZE
+    batch_size: int = BATCH_SIZE,
+    split_strategy: str = 'random'
 ) -> Dict[str, Any]:
     """Runs evaluation on held-out test data and saves metrics."""
     checkpoint_path = Path(checkpoint_path)
@@ -159,7 +160,7 @@ def evaluate(
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all()
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all(split_strategy=split_strategy)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
     integrity_report = _split_integrity_report(train_ds, val_ds, test_ds)
 
@@ -222,7 +223,8 @@ def evaluate(
         'weighted_recall': float(r_weighted),
         'weighted_f1': float(f1_weighted),
         'total_test_samples': int(len(y_true)),
-        'evaluation_protocol_version': 'scenario_grouped_random_split_v2',
+        'evaluation_protocol_version': f'scenario_grouped_{split_strategy}_v2',
+        'split_strategy': split_strategy,
         'evaluation_scope': 'same-benchmark simulated scenarios; not external-grid validation',
         'split_integrity': integrity_report,
         'confidence_diagnostics': _confidence_report(np.asarray(all_probs), y_true),
@@ -262,6 +264,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Evaluate GridSentry AI model on test set")
     parser.add_argument('--checkpoint', type=str, default=str(BEST_MODEL_PATH), help='Path to checkpoint')
     parser.add_argument('--output', type=str, default=str(EVALUATION_METRICS_PATH), help='Metrics output JSON')
+    parser.add_argument('--split-strategy', choices=['random', 'distance_holdout', 'resistance_holdout', 'angle_holdout'], default='random', help='Must match the training split strategy')
     args = parser.parse_args()
 
-    evaluate(checkpoint_path=args.checkpoint, metrics_output_path=args.output)
+    evaluate(checkpoint_path=args.checkpoint, metrics_output_path=args.output, split_strategy=args.split_strategy)
