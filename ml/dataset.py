@@ -140,7 +140,8 @@ def _cache_fingerprint(use_jitter: bool, split_strategy: str) -> str:
 def load_and_preprocess_all(
     cache_dir: Optional[Path] = None,
     use_jitter: bool = True,
-    split_strategy: str = 'random'
+    split_strategy: str = 'random',
+    write_shared_artifacts: bool = True
 ) -> Tuple[GridSentryDataset, GridSentryDataset, GridSentryDataset, Dict[str, Any]]:
     """
     Loads both Dataset 1 and Dataset 2, extracts 6-channel windows,
@@ -339,43 +340,45 @@ def load_and_preprocess_all(
         )
         print(f"Saved dataset cache to: {cache_file}")
 
-        # Save scaler params
-        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SCALER_PATH, 'w') as f:
-            json.dump(scaler, f, indent=2)
+        if write_shared_artifacts:
+            # Save scaler params
+            ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+            with open(SCALER_PATH, 'w') as f:
+                json.dump(scaler, f, indent=2)
 
-        # Save class mapping
-        class_mapping_data = {
-            'standard_classes': STANDARD_CLASSES,
-            'class_to_idx': CLASS_TO_IDX,
-            'idx_to_class': IDX_TO_CLASS,
-            'num_classes': len(STANDARD_CLASSES)
-        }
-        with open(CLASS_MAPPING_PATH, 'w') as f:
-            json.dump(class_mapping_data, f, indent=2)
+            # Save class mapping
+            class_mapping_data = {
+                'standard_classes': STANDARD_CLASSES,
+                'class_to_idx': CLASS_TO_IDX,
+                'idx_to_class': IDX_TO_CLASS,
+                'num_classes': len(STANDARD_CLASSES)
+            }
+            with open(CLASS_MAPPING_PATH, 'w') as f:
+                json.dump(class_mapping_data, f, indent=2)
 
-        # Save dataset split summary
-        split_summary = {
-            'total_physical_scenarios': 171,
-            'split_strategy': split_strategy,
-            'scenario_key_fields': ['distance_km', 'resistance_ohm', 'angle_deg'],
-            'train_scenarios': [list(key) for key in sorted(train_scenarios)],
-            'validation_scenarios': [list(key) for key in sorted(val_scenarios)],
-            'test_scenarios': [list(key) for key in sorted(test_scenarios)],
-            'train_scenarios_count': len(train_scenarios),
-            'val_scenarios_count': len(val_scenarios),
-            'test_scenarios_count': len(test_scenarios),
-            'train_windows': int(len(y_train)),
-            'val_windows': int(len(y_val)),
-            'test_windows': int(len(y_test)),
-            'window_length': WINDOW_LENGTH,
-            'num_channels': 6,
-            'channels': scaler['channels'],
-            'scaler': scaler
-        }
-        with open(summary_file, 'w') as f:
-            json.dump(split_summary, f, indent=2)
-        print(f"Saved split summary to: {summary_file}")
+            # Save dataset split summary
+            split_summary = {
+                'total_physical_scenarios': 171,
+                'split_strategy': split_strategy,
+                'scenario_key_fields': ['distance_km', 'resistance_ohm', 'angle_deg'],
+                'train_scenarios': [list(key) for key in sorted(train_scenarios)],
+                'validation_scenarios': [list(key) for key in sorted(val_scenarios)],
+                'test_scenarios': [list(key) for key in sorted(test_scenarios)],
+                'train_scenarios_count': len(train_scenarios),
+                'val_scenarios_count': len(val_scenarios),
+                'test_scenarios_count': len(test_scenarios),
+                'train_windows': int(len(y_train)),
+                'val_windows': int(len(y_val)),
+                'test_windows': int(len(y_test)),
+                'window_length': WINDOW_LENGTH,
+                'num_channels': 6,
+                'channels': scaler['channels'],
+                'scaler': scaler
+            }
+            with open(summary_file, 'w') as f:
+                json.dump(split_summary, f, indent=2)
+            print(f"Saved split summary to: {summary_file}")
+
         meta_train = meta_splits['train']
         meta_val = meta_splits['val']
         meta_test = meta_splits['test']
@@ -390,10 +393,11 @@ def load_and_preprocess_all(
 def get_dataloaders(
     batch_size: int = BATCH_SIZE,
     num_workers: int = 0,
-    split_strategy: str = 'random'
+    split_strategy: str = 'random',
+    write_shared_artifacts: bool = True
 ) -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Any]]:
     """Returns PyTorch DataLoaders for train, val, and test splits."""
-    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all(split_strategy=split_strategy)
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all(split_strategy=split_strategy, write_shared_artifacts=write_shared_artifacts)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
