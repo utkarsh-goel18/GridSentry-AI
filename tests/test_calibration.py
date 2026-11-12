@@ -7,7 +7,7 @@ from ml.calibration import fit_temperature
 def test_temperature_scaling_reduces_validation_nll_for_overconfident_logits():
     # Correct class is always the largest logit, but deliberately overconfident.
     logits = torch.tensor([[12.0, 0.0], [0.0, 10.0], [9.0, 0.0], [0.0, 11.0]])
-    targets = torch.tensor([0, 1, 0, 1])
+    targets = torch.tensor([0, 1, 0, 0])
 
     result = fit_temperature(logits, targets)
 
