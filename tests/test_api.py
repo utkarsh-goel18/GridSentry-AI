@@ -68,3 +68,43 @@ def test_predict_rejects_non_finite_waveform(client):
     )
 
     assert response.status_code == 422
+
+
+
+def test_legacy_perfect_metrics_are_not_exposed_as_verified(monkeypatch, tmp_path):
+    import backend.main as api
+
+    legacy = {
+        "test_accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "best_epoch": 10,
+        "val_loss": 0.0,
+    }
+    path = tmp_path / "legacy_metrics.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    monkeypatch.setattr(api, "EVALUATION_METRICS_PATH", path)
+
+    assert api._read_evaluation_summary() is None
+
+
+def test_metrics_with_failed_integrity_audit_are_not_exposed(monkeypatch, tmp_path):
+    import backend.main as api
+
+    audited = {
+        "test_accuracy": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "best_epoch": 10,
+        "val_loss": 0.0,
+        "evaluation_protocol_version": "scenario_grouped_random_v2",
+        "split_integrity": {
+            "scenario_disjoint": True,
+            "exact_windows_disjoint": False,
+        },
+    }
+    path = tmp_path / "failed_audit_metrics.json"
+    path.write_text(json.dumps(audited), encoding="utf-8")
+    monkeypatch.setattr(api, "EVALUATION_METRICS_PATH", path)
+
+    assert api._read_evaluation_summary() is None
