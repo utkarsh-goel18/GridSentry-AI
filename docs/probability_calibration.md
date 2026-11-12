@@ -33,7 +33,10 @@ This writes:
 - `artifacts/evaluation_metrics.json` — raw and calibrated test confidence
   diagnostics, alongside unchanged accuracy/F1 metrics.
 
-The API loads calibration only when the SHA-256 matches its currently loaded
+The API resolves a checkpoint-specific sidecar (`best_model.pt` uses
+`calibration.json`; `best_model_distance_audit.pt` uses
+`calibration_distance_audit.json`, and similarly for other checkpoint names).
+It loads calibration only when the SHA-256 matches its currently loaded
 checkpoint and the artifact declares validation-only fitting. If no matching
 artifact exists, inference falls back to raw softmax and explicitly marks the
 confidence as uncalibrated. It never invents a temperature or silently applies
