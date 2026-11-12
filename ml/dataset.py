@@ -89,20 +89,20 @@ def get_scenario_splits(random_seed: int = RANDOM_SEED, strategy: str = 'random'
         val_scenarios = {(d, r, a) for d in dists for r in rfs for a in angles[13:16]}
         test_scenarios = {(d, r, a) for d in dists for r in rfs for a in angles[16:]}
     else:
-      for d in dists:
-        for r in rfs:
-            shuffled_angles = rng.permutation(angles).tolist()
-            # 19 angles per (d, r): 13 train (~68.4%), 3 val (~15.8%), 3 test (~15.8%)
-            tr_a = shuffled_angles[:13]
-            va_a = shuffled_angles[13:16]
-            te_a = shuffled_angles[16:19]
+        for d in dists:
+            for r in rfs:
+                shuffled_angles = rng.permutation(angles).tolist()
+                # 19 angles per (d, r): 13 train, 3 validation, 3 test.
+                tr_a = shuffled_angles[:13]
+                va_a = shuffled_angles[13:16]
+                te_a = shuffled_angles[16:19]
 
-            for a in tr_a:
-                train_scenarios.add((d, r, a))
-            for a in va_a:
-                val_scenarios.add((d, r, a))
-            for a in te_a:
-                test_scenarios.add((d, r, a))
+                for a in tr_a:
+                    train_scenarios.add((d, r, a))
+                for a in va_a:
+                    val_scenarios.add((d, r, a))
+                for a in te_a:
+                    test_scenarios.add((d, r, a))
 
     assert len(train_scenarios) + len(val_scenarios) + len(test_scenarios) == 171
     return train_scenarios, val_scenarios, test_scenarios
