@@ -6,6 +6,7 @@ Confusion Matrix, and generates plots and JSON metrics.
 """
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Dict, Any
@@ -31,7 +32,8 @@ from ml.config import (
     NUM_CLASSES,
     BATCH_SIZE
 )
-from ml.dataset import get_dataloaders
+from torch.utils.data import DataLoader
+from ml.dataset import load_and_preprocess_all
 from ml.model import get_model
 
 
@@ -69,6 +71,75 @@ def plot_confusion_matrix(cm: np.ndarray, class_names: list, output_path: Path):
     print(f"Saved confusion matrix plot: {output_path}")
 
 
+def _scenario_keys(dataset):
+    """Return physical scenario keys represented by a dataset partition."""
+    return {
+        (item["distance_km"], item["resistance_ohm"], item["angle_deg"])
+        for item in dataset.metadata
+    }
+
+
+def _exact_window_hashes(dataset):
+    """Hash normalized windows to detect exact duplicates across partitions."""
+    hashes = set()
+    for window in dataset.waveforms:
+        contiguous = np.ascontiguousarray(window.numpy())
+        hashes.add(hashlib.sha256(contiguous.view(np.uint8)).hexdigest())
+    return hashes
+
+
+def _split_integrity_report(train_ds, val_ds, test_ds):
+    """Audit scenario separation and exact duplicate windows across partitions."""
+    scenario_sets = {
+        "train": _scenario_keys(train_ds),
+        "validation": _scenario_keys(val_ds),
+        "test": _scenario_keys(test_ds),
+    }
+    hash_sets = {
+        "train": _exact_window_hashes(train_ds),
+        "validation": _exact_window_hashes(val_ds),
+        "test": _exact_window_hashes(test_ds),
+    }
+    scenario_overlap = {
+        "train_validation": len(scenario_sets["train"] & scenario_sets["validation"]),
+        "train_test": len(scenario_sets["train"] & scenario_sets["test"]),
+        "validation_test": len(scenario_sets["validation"] & scenario_sets["test"]),
+    }
+    exact_duplicates = {
+        "train_validation": len(hash_sets["train"] & hash_sets["validation"]),
+        "train_test": len(hash_sets["train"] & hash_sets["test"]),
+        "validation_test": len(hash_sets["validation"] & hash_sets["test"]),
+    }
+    return {
+        "scenario_counts": {key: len(value) for key, value in scenario_sets.items()},
+        "scenario_overlap_counts": scenario_overlap,
+        "exact_duplicate_window_counts": exact_duplicates,
+        "scenario_disjoint": all(value == 0 for value in scenario_overlap.values()),
+        "exact_windows_disjoint": all(value == 0 for value in exact_duplicates.values()),
+        "grouping_key": ["distance_km", "resistance_ohm", "angle_deg"],
+    }
+
+
+def _confidence_report(probabilities, targets):
+    """Summarize confidence and simple calibration diagnostics."""
+    confidence = np.max(probabilities, axis=1)
+    predictions = np.argmax(probabilities, axis=1)
+    correct = predictions == targets
+    bins = np.linspace(0.0, 1.0, 16)
+    ece = 0.0
+    for lower, upper in zip(bins[:-1], bins[1:]):
+        mask = (confidence >= lower) & (confidence < upper if upper < 1.0 else confidence <= upper)
+        if np.any(mask):
+            ece += float(np.mean(mask)) * abs(float(np.mean(correct[mask])) - float(np.mean(confidence[mask])))
+    return {
+        "mean_max_probability": float(np.mean(confidence)),
+        "min_max_probability": float(np.min(confidence)),
+        "max_max_probability": float(np.max(confidence)),
+        "expected_calibration_error_15_bins": float(ece),
+        "brier_score_multiclass": float(np.mean(np.sum((probabilities - np.eye(probabilities.shape[1])[targets]) ** 2, axis=1))),
+    }
+
+
 def evaluate(
     checkpoint_path: Path = BEST_MODEL_PATH,
     metrics_output_path: Path = EVALUATION_METRICS_PATH,
@@ -88,7 +159,9 @@ def evaluate(
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    _, _, test_loader, scaler = get_dataloaders(batch_size=batch_size)
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all()
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+    integrity_report = _split_integrity_report(train_ds, val_ds, test_ds)
 
     all_preds = []
     all_targets = []
@@ -149,6 +222,10 @@ def evaluate(
         'weighted_recall': float(r_weighted),
         'weighted_f1': float(f1_weighted),
         'total_test_samples': int(len(y_true)),
+        'evaluation_protocol_version': 'scenario_grouped_random_split_v2',
+        'evaluation_scope': 'same-benchmark simulated scenarios; not external-grid validation',
+        'split_integrity': integrity_report,
+        'confidence_diagnostics': _confidence_report(np.asarray(all_probs), y_true),
         'per_class_metrics': per_class_metrics,
         'confusion_matrix': cm.tolist()
     }
@@ -165,6 +242,10 @@ def evaluate(
     print(f"      GridSentry AI — Test Set Evaluation Summary ({model_name})")
     print("=" * 65)
     print(f"Overall Accuracy:  {acc * 100:.2f}%")
+    print(f"Scenario split disjoint: {integrity_report['scenario_disjoint']}")
+    print(f"Exact windows disjoint:  {integrity_report['exact_windows_disjoint']}")
+    print(f"Mean max probability:    {metrics_result['confidence_diagnostics']['mean_max_probability']:.6f}")
+    print("NOTE: This is an in-benchmark scenario split, not external-grid validation.")
     print(f"Macro-F1 Score:    {f1_macro * 100:.2f}%")
     print(f"Weighted-F1 Score: {f1_weighted * 100:.2f}%")
     print("-" * 65)
