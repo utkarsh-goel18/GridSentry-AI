@@ -32,3 +32,21 @@ def test_temperature_scaling_rejects_empty_validation_set():
         assert "validation samples" in str(exc)
     else:
         raise AssertionError("Empty validation data must not be accepted.")
+
+
+def test_calibration_sidecar_is_selected_per_checkpoint(tmp_path):
+    from pathlib import Path
+    from ml.calibration import calibration_path_for_checkpoint
+
+    assert calibration_path_for_checkpoint(
+        Path("artifacts/best_model.pt"), tmp_path
+    ) == tmp_path / "calibration.json"
+    assert calibration_path_for_checkpoint(
+        Path("artifacts/best_model_distance_audit.pt"), tmp_path
+    ) == tmp_path / "calibration_distance_audit.json"
+    assert calibration_path_for_checkpoint(
+        Path("artifacts/best_model_resistance_audit.pt"), tmp_path
+    ) == tmp_path / "calibration_resistance_audit.json"
+    assert calibration_path_for_checkpoint(
+        Path("artifacts/custom_experiment.pt"), tmp_path
+    ) == tmp_path / "calibration_custom_experiment.json"
