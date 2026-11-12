@@ -2,6 +2,9 @@
 GridSentry AI — preprocessing and split integrity tests.
 """
 import numpy as np
+import torch
+from types import SimpleNamespace
+from ml.evaluate import _split_integrity_report
 from ml.loader import MatlabSignalLoader
 from ml.dataset import get_scenario_splits
 from ml.config import WINDOW_LENGTH
@@ -65,3 +68,35 @@ def test_inference_rejects_non_finite_values():
         assert "NaN" in str(exc) or "infinite" in str(exc)
     else:
         raise AssertionError("Non-finite input should be rejected.")
+
+
+
+def _tiny_partition(metadata, waveform_value):
+    waveforms = torch.full((len(metadata), 6, 512), waveform_value, dtype=torch.float32)
+    return SimpleNamespace(metadata=metadata, waveforms=waveforms)
+
+
+def test_integrity_report_detects_scenario_overlap():
+    row = {"distance_km": 20, "resistance_ohm": 1.0, "angle_deg": 0}
+    train = _tiny_partition([row], 1.0)
+    val = _tiny_partition([row], 2.0)
+    test = _tiny_partition([], 3.0)
+
+    report = _split_integrity_report(train, val, test)
+
+    assert report["scenario_disjoint"] is False
+    assert report["scenario_overlap_counts"]["train_validation"] == 1
+
+
+def test_integrity_report_detects_exact_duplicate_windows():
+    train_row = {"distance_km": 20, "resistance_ohm": 1.0, "angle_deg": 0}
+    test_row = {"distance_km": 280, "resistance_ohm": 100.0, "angle_deg": 180}
+    train = _tiny_partition([train_row], 1.0)
+    val = _tiny_partition([], 2.0)
+    test = _tiny_partition([test_row], 1.0)
+
+    report = _split_integrity_report(train, val, test)
+
+    assert report["scenario_disjoint"] is True
+    assert report["exact_windows_disjoint"] is False
+    assert report["exact_duplicate_window_counts"]["train_test"] == 1
