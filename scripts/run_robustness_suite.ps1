@@ -14,13 +14,14 @@ foreach ($experiment in $experiments) {
     $strategy = $experiment.Split
     $checkpoint = "artifacts/best_model_{0}_audit.pt" -f $name
     $metrics = "artifacts/evaluation_metrics_{0}_audit.json" -f $name
+    $config = "artifacts/config_{0}_audit.json" -f $name
 
     Write-Host ""
     Write-Host "============================================================"
     Write-Host "Training experiment: $name ($strategy)"
     Write-Host "============================================================"
 
-    python -m ml.train --model 1d_cnn --epochs 20 --split-strategy $strategy --checkpoint $checkpoint
+    python -m ml.train --model 1d_cnn --epochs 20 --split-strategy $strategy --checkpoint $checkpoint --config-out $config
     if ($LASTEXITCODE -ne 0) {
         throw "Training failed for $strategy (exit code $LASTEXITCODE)."
     }
