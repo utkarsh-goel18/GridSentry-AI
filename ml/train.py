@@ -151,14 +151,15 @@ def train(
     patience: int = EARLY_STOPPING_PATIENCE,
     checkpoint_path: Path = BEST_MODEL_PATH,
     split_strategy: str = 'random',
-    config_output_path: Path = CONFIG_PATH
+    config_output_path: Path = CONFIG_PATH,
+    write_shared_artifacts: bool = True
 ) -> Dict[str, Any]:
     """Complete training loop with validation, scheduling, and early stopping."""
     set_seed(RANDOM_SEED)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Starting training on device: {device} | Model: {model_name}")
 
-    train_loader, val_loader, test_loader, scaler = get_dataloaders(batch_size=batch_size, split_strategy=split_strategy)
+    train_loader, val_loader, test_loader, scaler = get_dataloaders(batch_size=batch_size, split_strategy=split_strategy, write_shared_artifacts=write_shared_artifacts)
 
     model = get_model(model_name, num_classes=NUM_CLASSES).to(device)
     print(f"Model architecture initialized ({model.count_parameters():,} trainable parameters)")
@@ -282,6 +283,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE, help='Batch size')
     parser.add_argument('--lr', type=float, default=LEARNING_RATE, help='Learning rate')
     parser.add_argument('--checkpoint', type=str, default=None, help='Custom path to save checkpoint')
+    parser.add_argument('--no-write-shared-artifacts', action='store_true', help='Preserve shared production scaler, class map and split summary')
     parser.add_argument('--split-strategy', choices=['random', 'distance_holdout', 'resistance_holdout', 'angle_holdout'], default='random', help='Scenario grouping strategy')
     parser.add_argument('--config-out', type=str, default=None, help='Custom path to save config JSON')
     args = parser.parse_args()
@@ -296,5 +298,6 @@ if __name__ == '__main__':
         learning_rate=args.lr,
         checkpoint_path=ckpt,
         split_strategy=args.split_strategy,
-        config_output_path=cfg
+        config_output_path=cfg,
+        write_shared_artifacts=not args.no_write_shared_artifacts
     )
