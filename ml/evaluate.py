@@ -6,6 +6,7 @@ Confusion Matrix, and generates plots and JSON metrics.
 """
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Dict, Any
@@ -31,8 +32,10 @@ from ml.config import (
     NUM_CLASSES,
     BATCH_SIZE
 )
-from ml.dataset import get_dataloaders
+from torch.utils.data import DataLoader
+from ml.dataset import load_and_preprocess_all
 from ml.model import get_model
+from ml.calibration import fit_temperature, write_calibration
 
 
 def plot_confusion_matrix(cm: np.ndarray, class_names: list, output_path: Path):
@@ -69,10 +72,81 @@ def plot_confusion_matrix(cm: np.ndarray, class_names: list, output_path: Path):
     print(f"Saved confusion matrix plot: {output_path}")
 
 
+def _scenario_keys(dataset):
+    """Return physical scenario keys represented by a dataset partition."""
+    return {
+        (item["distance_km"], item["resistance_ohm"], item["angle_deg"])
+        for item in dataset.metadata
+    }
+
+
+def _exact_window_hashes(dataset):
+    """Hash normalized windows to detect exact duplicates across partitions."""
+    hashes = set()
+    for window in dataset.waveforms:
+        contiguous = np.ascontiguousarray(window.numpy())
+        hashes.add(hashlib.sha256(contiguous.view(np.uint8)).hexdigest())
+    return hashes
+
+
+def _split_integrity_report(train_ds, val_ds, test_ds):
+    """Audit scenario separation and exact duplicate windows across partitions."""
+    scenario_sets = {
+        "train": _scenario_keys(train_ds),
+        "validation": _scenario_keys(val_ds),
+        "test": _scenario_keys(test_ds),
+    }
+    hash_sets = {
+        "train": _exact_window_hashes(train_ds),
+        "validation": _exact_window_hashes(val_ds),
+        "test": _exact_window_hashes(test_ds),
+    }
+    scenario_overlap = {
+        "train_validation": len(scenario_sets["train"] & scenario_sets["validation"]),
+        "train_test": len(scenario_sets["train"] & scenario_sets["test"]),
+        "validation_test": len(scenario_sets["validation"] & scenario_sets["test"]),
+    }
+    exact_duplicates = {
+        "train_validation": len(hash_sets["train"] & hash_sets["validation"]),
+        "train_test": len(hash_sets["train"] & hash_sets["test"]),
+        "validation_test": len(hash_sets["validation"] & hash_sets["test"]),
+    }
+    return {
+        "scenario_counts": {key: len(value) for key, value in scenario_sets.items()},
+        "scenario_overlap_counts": scenario_overlap,
+        "exact_duplicate_window_counts": exact_duplicates,
+        "scenario_disjoint": all(value == 0 for value in scenario_overlap.values()),
+        "exact_windows_disjoint": all(value == 0 for value in exact_duplicates.values()),
+        "grouping_key": ["distance_km", "resistance_ohm", "angle_deg"],
+    }
+
+
+def _confidence_report(probabilities, targets):
+    """Summarize confidence and simple calibration diagnostics."""
+    confidence = np.max(probabilities, axis=1)
+    predictions = np.argmax(probabilities, axis=1)
+    correct = predictions == targets
+    bins = np.linspace(0.0, 1.0, 16)
+    ece = 0.0
+    for lower, upper in zip(bins[:-1], bins[1:]):
+        mask = (confidence >= lower) & (confidence < upper if upper < 1.0 else confidence <= upper)
+        if np.any(mask):
+            ece += float(np.mean(mask)) * abs(float(np.mean(correct[mask])) - float(np.mean(confidence[mask])))
+    return {
+        "mean_max_probability": float(np.mean(confidence)),
+        "min_max_probability": float(np.min(confidence)),
+        "max_max_probability": float(np.max(confidence)),
+        "expected_calibration_error_15_bins": float(ece),
+        "brier_score_multiclass": float(np.mean(np.sum((probabilities - np.eye(probabilities.shape[1])[targets]) ** 2, axis=1))),
+    }
+
+
 def evaluate(
     checkpoint_path: Path = BEST_MODEL_PATH,
     metrics_output_path: Path = EVALUATION_METRICS_PATH,
-    batch_size: int = BATCH_SIZE
+    batch_size: int = BATCH_SIZE,
+    split_strategy: str = 'random',
+    write_shared_artifacts: bool = True
 ) -> Dict[str, Any]:
     """Runs evaluation on held-out test data and saves metrics."""
     checkpoint_path = Path(checkpoint_path)
@@ -82,17 +156,46 @@ def evaluate(
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Loading checkpoint: {checkpoint_path} on {device}...")
     checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint_strategy = checkpoint.get('split_strategy', 'random')
+    if checkpoint_strategy != split_strategy:
+        raise ValueError(
+            f"Checkpoint was trained with split strategy '{checkpoint_strategy}', "
+            f"but evaluation requested '{split_strategy}'."
+        )
 
     model_name = checkpoint.get('model_name', '1d_cnn')
     model = get_model(model_name, num_classes=NUM_CLASSES).to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    _, _, test_loader, scaler = get_dataloaders(batch_size=batch_size)
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all(split_strategy=split_strategy, write_shared_artifacts=write_shared_artifacts)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+    integrity_report = _split_integrity_report(train_ds, val_ds, test_ds)
+
+    # Fit calibration exclusively on the validation partition.
+    val_logits = []
+    val_targets = []
+    with torch.inference_mode():
+        for waveforms, labels in val_loader:
+            val_logits.append(model(waveforms.to(device)).cpu())
+            val_targets.append(labels.cpu())
+    fitted_calibration = fit_temperature(torch.cat(val_logits), torch.cat(val_targets))
+    calibration_path = Path(metrics_output_path).with_name(
+        "calibration.json" if Path(metrics_output_path).name == EVALUATION_METRICS_PATH.name
+        else f"calibration_{Path(metrics_output_path).stem.removeprefix('evaluation_metrics_')}.json"
+    )
+    calibration_artifact = write_calibration(
+        calibration_path, checkpoint_path, split_strategy, fitted_calibration
+    )
+    temperature = calibration_artifact["temperature"]
+    print(f"Validation-fitted temperature: {temperature:.4f}")
+    print(f"Saved calibration artifact: {calibration_path}")
 
     all_preds = []
     all_targets = []
     all_probs = []
+    all_calibrated_probs = []
 
     print(f"Running inference on {len(test_loader.dataset)} held-out test samples...")
     with torch.no_grad():
@@ -100,11 +203,13 @@ def evaluate(
             waveforms = waveforms.to(device)
             logits = model(waveforms)
             probs = torch.softmax(logits, dim=1).cpu().numpy()
+            calibrated_probs = torch.softmax(logits / temperature, dim=1).cpu().numpy()
             preds = np.argmax(probs, axis=1)
 
             all_preds.extend(preds)
             all_targets.extend(labels.numpy())
             all_probs.extend(probs)
+            all_calibrated_probs.extend(calibrated_probs)
 
     y_true = np.array(all_targets)
     y_pred = np.array(all_preds)
@@ -132,7 +237,8 @@ def evaluate(
     cm = confusion_matrix(y_true, y_pred, labels=range(NUM_CLASSES))
 
     # Plot confusion matrix
-    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}.png"
+    plot_suffix = '' if split_strategy == 'random' else f'_{split_strategy}'
+    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}{plot_suffix}.png"
     plot_confusion_matrix(cm, STANDARD_CLASSES, cm_plot_path)
 
     metrics_result = {
@@ -149,6 +255,13 @@ def evaluate(
         'weighted_recall': float(r_weighted),
         'weighted_f1': float(f1_weighted),
         'total_test_samples': int(len(y_true)),
+        'evaluation_protocol_version': f'scenario_grouped_{split_strategy}_v2',
+        'split_strategy': split_strategy,
+        'evaluation_scope': 'same-benchmark simulated scenarios; not external-grid validation',
+        'split_integrity': integrity_report,
+        'confidence_diagnostics_raw': _confidence_report(np.asarray(all_probs), y_true),
+        'confidence_diagnostics_calibrated': _confidence_report(np.asarray(all_calibrated_probs), y_true),
+        'calibration': calibration_artifact,
         'per_class_metrics': per_class_metrics,
         'confusion_matrix': cm.tolist()
     }
@@ -165,6 +278,11 @@ def evaluate(
     print(f"      GridSentry AI — Test Set Evaluation Summary ({model_name})")
     print("=" * 65)
     print(f"Overall Accuracy:  {acc * 100:.2f}%")
+    print(f"Scenario split disjoint: {integrity_report['scenario_disjoint']}")
+    print(f"Exact windows disjoint:  {integrity_report['exact_windows_disjoint']}")
+    print(f"Mean raw max probability:        {metrics_result['confidence_diagnostics_raw']['mean_max_probability']:.6f}")
+    print(f"Mean calibrated max probability: {metrics_result['confidence_diagnostics_calibrated']['mean_max_probability']:.6f}")
+    print("NOTE: This is an in-benchmark scenario split, not external-grid validation.")
     print(f"Macro-F1 Score:    {f1_macro * 100:.2f}%")
     print(f"Weighted-F1 Score: {f1_weighted * 100:.2f}%")
     print("-" * 65)
@@ -181,6 +299,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Evaluate GridSentry AI model on test set")
     parser.add_argument('--checkpoint', type=str, default=str(BEST_MODEL_PATH), help='Path to checkpoint')
     parser.add_argument('--output', type=str, default=str(EVALUATION_METRICS_PATH), help='Metrics output JSON')
+    parser.add_argument('--no-write-shared-artifacts', action='store_true', help='Preserve shared production preprocessing files')
+    parser.add_argument('--split-strategy', choices=['random', 'distance_holdout', 'resistance_holdout', 'angle_holdout'], default='random', help='Must match the training split strategy')
     args = parser.parse_args()
 
-    evaluate(checkpoint_path=args.checkpoint, metrics_output_path=args.output)
+    evaluate(checkpoint_path=args.checkpoint, metrics_output_path=args.output, split_strategy=args.split_strategy, write_shared_artifacts=not args.no_write_shared_artifacts)

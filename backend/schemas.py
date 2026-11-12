@@ -100,6 +100,9 @@ class PredictResponse(BaseModel):
     predicted_fault: str
     fault_description: str
     confidence: float
+    raw_confidence: Optional[float] = None
+    confidence_is_calibrated: bool = False
+    calibration: Optional[Dict[str, Any]] = None
     class_probabilities: Dict[str, float]
     input_type: str
     sample_metadata: Optional[Dict[str, Any]] = None

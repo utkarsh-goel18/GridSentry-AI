@@ -149,14 +149,17 @@ def train(
     learning_rate: float = LEARNING_RATE,
     weight_decay: float = WEIGHT_DECAY,
     patience: int = EARLY_STOPPING_PATIENCE,
-    checkpoint_path: Path = BEST_MODEL_PATH
+    checkpoint_path: Path = BEST_MODEL_PATH,
+    split_strategy: str = 'random',
+    config_output_path: Path = CONFIG_PATH,
+    write_shared_artifacts: bool = True
 ) -> Dict[str, Any]:
     """Complete training loop with validation, scheduling, and early stopping."""
     set_seed(RANDOM_SEED)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Starting training on device: {device} | Model: {model_name}")
 
-    train_loader, val_loader, test_loader, scaler = get_dataloaders(batch_size=batch_size)
+    train_loader, val_loader, test_loader, scaler = get_dataloaders(batch_size=batch_size, split_strategy=split_strategy, write_shared_artifacts=write_shared_artifacts)
 
     model = get_model(model_name, num_classes=NUM_CLASSES).to(device)
     print(f"Model architecture initialized ({model.count_parameters():,} trainable parameters)")
@@ -210,6 +213,7 @@ def train(
                 'val_loss': va_loss,
                 'val_accuracy': va_acc,
                 'model_name': model_name,
+                'split_strategy': split_strategy,
                 'num_classes': NUM_CLASSES,
                 'in_channels': 6,
                 'window_length': WINDOW_LENGTH,
@@ -229,12 +233,14 @@ def train(
     print(f"Training completed in {total_time:.1f}s. Best Val Loss: {best_val_loss:.4f}, Val Acc: {best_val_acc*100:.2f}%")
 
     # Plot training curves
-    plot_path = FIGURES_DIR / f"training_history_{model_name}.png"
+    plot_suffix = '' if split_strategy == 'random' else f'_{split_strategy}'
+    plot_path = FIGURES_DIR / f"training_history_{model_name}{plot_suffix}.png"
     plot_training_curves(history, plot_path)
 
     # Save training configuration
     config_data = {
         'model_name': model_name,
+        'split_strategy': split_strategy,
         'parameters_count': model.count_parameters(),
         'best_epoch': best_epoch,
         'best_val_loss': float(best_val_loss),
@@ -256,7 +262,9 @@ def train(
         },
         'classes': STANDARD_CLASSES
     }
-    with open(CONFIG_PATH, 'w') as f:
+    config_output_path = Path(config_output_path)
+    config_output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_output_path, 'w') as f:
         json.dump(config_data, f, indent=2)
 
     return {
@@ -275,6 +283,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE, help='Batch size')
     parser.add_argument('--lr', type=float, default=LEARNING_RATE, help='Learning rate')
     parser.add_argument('--checkpoint', type=str, default=None, help='Custom path to save checkpoint')
+    parser.add_argument('--no-write-shared-artifacts', action='store_true', help='Preserve shared production scaler, class map and split summary')
+    parser.add_argument('--split-strategy', choices=['random', 'distance_holdout', 'resistance_holdout', 'angle_holdout'], default='random', help='Scenario grouping strategy')
     parser.add_argument('--config-out', type=str, default=None, help='Custom path to save config JSON')
     args = parser.parse_args()
 
@@ -286,5 +296,8 @@ if __name__ == '__main__':
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,
-        checkpoint_path=ckpt
+        checkpoint_path=ckpt,
+        split_strategy=args.split_strategy,
+        config_output_path=cfg,
+        write_shared_artifacts=not args.no_write_shared_artifacts
     )

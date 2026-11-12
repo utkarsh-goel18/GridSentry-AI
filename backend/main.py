@@ -3,6 +3,7 @@ GridSentry AI — FastAPI application.
 """
 import datetime
 import json
+import os
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -61,10 +62,11 @@ async def validation_exception_handler(
         content={"detail": errors}
     )
 
-# Restrict origins through GRID_SENTY_CORS_ORIGINS in deployment if the UI is hosted elsewhere.
+# Comma-separated allowlist; keep production origins explicit.
+_cors_origins = [origin.strip() for origin in os.getenv("GRID_SENTRY_CORS_ORIGINS", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
@@ -91,6 +93,13 @@ def _read_evaluation_summary():
             data = json.load(handle)
         required = ("test_accuracy", "macro_f1", "weighted_f1", "best_epoch", "val_loss")
         if any(key not in data or data[key] is None for key in required):
+            return None
+        # Legacy metrics without a reproducible split-integrity audit must not
+        # be presented as validated performance in the dashboard.
+        integrity = data.get("split_integrity")
+        if not data.get("evaluation_protocol_version") or not isinstance(integrity, dict):
+            return None
+        if not integrity.get("scenario_disjoint") or not integrity.get("exact_windows_disjoint"):
             return None
         values = [float(data[k]) for k in required if k != "best_epoch"]
         if not all(np.isfinite(value) for value in values):

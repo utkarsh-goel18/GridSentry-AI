@@ -2,6 +2,10 @@
 GridSentry AI — preprocessing and split integrity tests.
 """
 import numpy as np
+import pytest
+import torch
+from types import SimpleNamespace
+from ml.evaluate import _split_integrity_report
 from ml.loader import MatlabSignalLoader
 from ml.dataset import get_scenario_splits
 from ml.config import WINDOW_LENGTH
@@ -65,3 +69,71 @@ def test_inference_rejects_non_finite_values():
         assert "NaN" in str(exc) or "infinite" in str(exc)
     else:
         raise AssertionError("Non-finite input should be rejected.")
+
+
+
+def _tiny_partition(metadata, waveform_value):
+    waveforms = torch.full((len(metadata), 6, 512), waveform_value, dtype=torch.float32)
+    return SimpleNamespace(metadata=metadata, waveforms=waveforms)
+
+
+def test_integrity_report_detects_scenario_overlap():
+    row = {"distance_km": 20, "resistance_ohm": 1.0, "angle_deg": 0}
+    train = _tiny_partition([row], 1.0)
+    val = _tiny_partition([row], 2.0)
+    test = _tiny_partition([], 3.0)
+
+    report = _split_integrity_report(train, val, test)
+
+    assert report["scenario_disjoint"] is False
+    assert report["scenario_overlap_counts"]["train_validation"] == 1
+
+
+def test_integrity_report_detects_exact_duplicate_windows():
+    train_row = {"distance_km": 20, "resistance_ohm": 1.0, "angle_deg": 0}
+    test_row = {"distance_km": 280, "resistance_ohm": 100.0, "angle_deg": 180}
+    train = _tiny_partition([train_row], 1.0)
+    val = _tiny_partition([], 2.0)
+    test = _tiny_partition([test_row], 1.0)
+
+    report = _split_integrity_report(train, val, test)
+
+    assert report["scenario_disjoint"] is True
+    assert report["exact_windows_disjoint"] is False
+    assert report["exact_duplicate_window_counts"]["train_test"] == 1
+
+
+
+@pytest.mark.parametrize("strategy,expected_sizes", [
+    ("distance_holdout", (57, 57, 57)),
+    ("resistance_holdout", (57, 57, 57)),
+    ("angle_holdout", (117, 27, 27)),
+])
+def test_group_holdout_splits_are_disjoint_and_complete(strategy, expected_sizes):
+    train, val, test = get_scenario_splits(strategy=strategy)
+    assert train.isdisjoint(val)
+    assert train.isdisjoint(test)
+    assert val.isdisjoint(test)
+    assert len(train | val | test) == 171
+    assert (len(train), len(val), len(test)) == expected_sizes
+
+
+def test_distance_holdout_uses_unseen_distance_values():
+    train, val, test = get_scenario_splits(strategy="distance_holdout")
+    assert {key[0] for key in train} == {20}
+    assert {key[0] for key in val} == {150}
+    assert {key[0] for key in test} == {280}
+
+
+def test_resistance_holdout_uses_unseen_resistance_values():
+    train, val, test = get_scenario_splits(strategy="resistance_holdout")
+    assert {key[1] for key in train} == {1.0}
+    assert {key[1] for key in val} == {50.0}
+    assert {key[1] for key in test} == {100.0}
+
+
+def test_angle_holdout_uses_unseen_inception_angles():
+    train, val, test = get_scenario_splits(strategy="angle_holdout")
+    assert {key[2] for key in train} == set(range(0, 130, 10))
+    assert {key[2] for key in val} == {130, 140, 150}
+    assert {key[2] for key in test} == {160, 170, 180}

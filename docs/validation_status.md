@@ -1,29 +1,62 @@
 # Validation status and reproducibility notes
 
+## Current status
+
+GridSentry AI is a research prototype evaluated on simulated recordings from one 500 kV Chesf transmission-line benchmark. It is not a certified protection relay and has not been validated on operational grid measurements.
+
+The committed historical `artifacts/evaluation_metrics.json` reports 100% accuracy and F1 on 1,230 test windows. Treat this as a historical benchmark result only. It is not an independently reproduced result and is not evidence of external-grid generalisation.
+
+## Split design and audit
+
+The standard split groups each physical scenario by `(distance_km, resistance_ohm, angle_deg)` and assigns that key consistently across Dataset 1 and Dataset 2. This is intended to prevent the same parameterised scenario appearing in more than one partition.
+
+The evaluation pipeline now preserves per-window scenario metadata in the preprocessing cache and reports:
+- Train/validation/test scenario counts.
+- Scenario-key overlap across partitions.
+- Exact duplicate normalized-window hashes across partitions.
+- Mean, minimum and maximum maximum-class probability.
+- A 15-bin expected calibration error and multiclass Brier score.
+
+The dashboard suppresses legacy evaluation summaries until a newly generated metrics artifact contains the evaluation protocol and reports both scenario and exact-window partitions as disjoint. This prevents the historical 100% figure from being presented as newly audited performance.
+
+An exact-hash audit cannot detect all near-duplicates or shared simulation lineage. A zero-overlap result is necessary, not sufficient, evidence of independence.
+
+## What remains unproven
+
+The standard random scenario split still samples from the same parameter grid, topology and simulation family. It does not establish performance on:
+1. An unseen distance value or line length.
+2. An unseen fault resistance.
+3. An unseen inception angle distribution.
+4. A different transmission-line topology or simulator.
+5. Field recordings, sensor noise, CT/PT saturation, switching transients or non-fault events.
+
+The existing ten-class API script is an integration smoke test using one representative recording per class. Its 10/10 result must not be reported as model accuracy.
+
+## Required local reproduction
+
+The raw dataset archives are intentionally not committed. After placing both source ZIP files in the repository root, run:
+
+```powershell
+python -m pytest -q
+python -m ml.train --model 1d_cnn --split-strategy random --checkpoint artifacts/best_model_random_audit.pt --config-out artifacts/config_random_audit.json
+python -m ml.evaluate --checkpoint artifacts/best_model_random_audit.pt --output artifacts/evaluation_metrics_random_audit.json --split-strategy random
+```
+
+The preprocessing cache fingerprint was advanced when scenario metadata became part of the cache. A stale cache will be rebuilt automatically. Keep the generated metrics, checkpoint, scaler and split summary together; they must come from the same run.
+
+The repository now includes separate group-holdout strategies for distance, resistance and inception angle. Run the complete reproducible suite with `powershell -ExecutionPolicy Bypass -File scripts/run_robustness_suite.ps1`. It trains a fresh model for each split, uses separate checkpoints/configs/metrics, and leaves the production `best_model.pt` untouched. Compare the resulting test metrics across protocols. These are still tests within the same benchmark family; cross-topology or field-data validation remains necessary. Do not tune the model against the final test set, and do not change reported scores to target a preferred percentage.
+
 ## API guarantees
 
 - The health endpoint reports whether a model is actually loaded.
 - Model metadata comes from the loaded checkpoint and configured class mapping.
-- Evaluation metrics are returned only when a readable metrics artifact contains the required values. Missing or malformed metrics are represented as null rather than replaced with perfect scores.
+- Evaluation metrics are shown only when a readable metrics artifact includes the new split-integrity audit and passes both disjointness checks.
 - A direct waveform must be a finite, rectangular matrix with six channels and at least 512 samples.
-- A direct waveform longer than 512 samples must include an explicit zero-based fault_index. The API no longer guesses a fault location from recording length.
-- The sample_id path uses the Dataset 1 fault index configured in ml/config.py.
-
-## Evaluation caveat
-
-The committed artifacts/evaluation_metrics.json currently reports 100% accuracy and F1 on 1,230 test windows. This is a recorded artifact, not an independently reproduced result in this repository session.
-
-The scenario split assigns the same (distance_km, resistance_ohm, angle_deg) key to the same partition across Dataset 1 and Dataset 2. This is a useful leakage control, but it does not by itself establish generalization to another transmission-line topology, simulation model, or real-world measurements.
-
-Before presenting the 100% figure as independently verified:
-1. Rebuild the preprocessing cache from the raw archives.
-2. Re-run training and evaluation from a clean environment.
-3. Verify Dataset 1 / Dataset 2 MATLAB axis ordering and channel orientation against source metadata.
-4. Inspect duplicate and near-duplicate signals across partitions.
-5. Preserve the newly generated metrics and confusion matrix with the exact checkpoint used.
+- A direct waveform longer than 512 samples must include an explicit zero-based `fault_index`.
+- The sample_id path uses the Dataset 1 fault index configured in `ml/config.py`.
 
 ## Direct waveform API
 
-For an already extracted 512-sample window, send a 6-channel matrix under waveform. Each channel must contain exactly 512 finite numeric values.
+For an already extracted 512-sample window, send a 6-channel matrix under `waveform`. Each channel must contain exactly 512 finite numeric values.
 
-For a longer recording, provide the zero-based sample index of fault inception using fault_index and optionally pre_fault_samples. For example, a Dataset 1 recording may use fault_index 6527 and pre_fault_samples 64 if that index matches its time reference. Do not reuse it blindly for a different dataset.
+For a longer recording, provide the zero-based sample index of fault inception using `fault_index` and optionally `pre_fault_samples`. For example, Dataset 1 may use fault index 6527 and pre-fault samples 64 when that time reference matches the recording. Do not reuse it blindly for another dataset.
