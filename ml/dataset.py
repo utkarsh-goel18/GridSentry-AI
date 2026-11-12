@@ -59,12 +59,14 @@ class GridSentryDataset(Dataset):
         return self.waveforms[idx], self.labels[idx]
 
 
-def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
+def get_scenario_splits(random_seed: int = RANDOM_SEED, strategy: str = 'random') -> Tuple[set, set, set]:
     """
     Partitions the 171 physical simulation scenarios (distance, resistance, angle)
     into Train (~70%), Val (~15%), Test (~15%), stratified across (dist, rf) operating conditions.
     Uses a local RNG so calling this function does not mutate global NumPy state.
     """
+    if strategy not in {'random', 'distance_holdout', 'resistance_holdout', 'angle_holdout'}:
+        raise ValueError(f'Unknown split strategy: {strategy}')
     rng = np.random.default_rng(random_seed)
     dists = [20, 150, 280]
     rfs = [1.0, 50.0, 100.0]
@@ -74,7 +76,20 @@ def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
     val_scenarios = set()
     test_scenarios = set()
 
-    for d in dists:
+    if strategy == 'distance_holdout':
+        train_scenarios = {(20, r, a) for r in rfs for a in angles}
+        val_scenarios = {(150, r, a) for r in rfs for a in angles}
+        test_scenarios = {(280, r, a) for r in rfs for a in angles}
+    elif strategy == 'resistance_holdout':
+        train_scenarios = {(d, 1.0, a) for d in dists for a in angles}
+        val_scenarios = {(d, 50.0, a) for d in dists for a in angles}
+        test_scenarios = {(d, 100.0, a) for d in dists for a in angles}
+    elif strategy == 'angle_holdout':
+        train_scenarios = {(d, r, a) for d in dists for r in rfs for a in angles[:13]}
+        val_scenarios = {(d, r, a) for d in dists for r in rfs for a in angles[13:16]}
+        test_scenarios = {(d, r, a) for d in dists for r in rfs for a in angles[16:]}
+    else:
+      for d in dists:
         for r in rfs:
             shuffled_angles = rng.permutation(angles).tolist()
             # 19 angles per (d, r): 13 train (~68.4%), 3 val (~15.8%), 3 test (~15.8%)
@@ -93,7 +108,7 @@ def get_scenario_splits(random_seed: int = RANDOM_SEED) -> Tuple[set, set, set]:
     return train_scenarios, val_scenarios, test_scenarios
 
 
-def _cache_fingerprint(use_jitter: bool) -> str:
+def _cache_fingerprint(use_jitter: bool, split_strategy: str) -> str:
     """Fingerprint source archive metadata and preprocessing settings for cache invalidation."""
     sources = []
     for archive_path in (DATASET_1_ZIP, DATASET_2_ZIP):
@@ -107,9 +122,10 @@ def _cache_fingerprint(use_jitter: bool) -> str:
         else:
             sources.append({"path": archive_path.name, "missing": True})
     payload = {
-        "cache_schema": 3,
+        "cache_schema": 4,
         "sources": sources,
         "use_jitter": bool(use_jitter),
+        "split_strategy": split_strategy,
         "random_seed": RANDOM_SEED,
         "window_length": WINDOW_LENGTH,
         "d1_fault_index": D1_FAULT_INDEX,
@@ -123,7 +139,8 @@ def _cache_fingerprint(use_jitter: bool) -> str:
 
 def load_and_preprocess_all(
     cache_dir: Optional[Path] = None,
-    use_jitter: bool = True
+    use_jitter: bool = True,
+    split_strategy: str = 'random'
 ) -> Tuple[GridSentryDataset, GridSentryDataset, GridSentryDataset, Dict[str, Any]]:
     """
     Loads both Dataset 1 and Dataset 2, extracts 6-channel windows,
@@ -136,9 +153,9 @@ def load_and_preprocess_all(
     cache_file = cache_dir / "preprocessed_dataset.npz"
     summary_file = ARTIFACTS_DIR / "dataset_split_summary.json"
 
-    train_scenarios, val_scenarios, test_scenarios = get_scenario_splits()
+    train_scenarios, val_scenarios, test_scenarios = get_scenario_splits(strategy=split_strategy)
 
-    fingerprint = _cache_fingerprint(use_jitter)
+    fingerprint = _cache_fingerprint(use_jitter, split_strategy)
     cache_valid = False
     if cache_file.exists():
         try:
@@ -367,10 +384,11 @@ def load_and_preprocess_all(
 
 def get_dataloaders(
     batch_size: int = BATCH_SIZE,
-    num_workers: int = 0
+    num_workers: int = 0,
+    split_strategy: str = 'random'
 ) -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Any]]:
     """Returns PyTorch DataLoaders for train, val, and test splits."""
-    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all()
+    train_ds, val_ds, test_ds, scaler = load_and_preprocess_all(split_strategy=split_strategy)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
