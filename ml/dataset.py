@@ -357,6 +357,11 @@ def load_and_preprocess_all(
         # Save dataset split summary
         split_summary = {
             'total_physical_scenarios': 171,
+            'split_strategy': split_strategy,
+            'scenario_key_fields': ['distance_km', 'resistance_ohm', 'angle_deg'],
+            'train_scenarios': [list(key) for key in sorted(train_scenarios)],
+            'validation_scenarios': [list(key) for key in sorted(val_scenarios)],
+            'test_scenarios': [list(key) for key in sorted(test_scenarios)],
             'train_scenarios_count': len(train_scenarios),
             'val_scenarios_count': len(val_scenarios),
             'test_scenarios_count': len(test_scenarios),
