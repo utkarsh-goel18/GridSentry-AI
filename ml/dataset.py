@@ -107,7 +107,7 @@ def _cache_fingerprint(use_jitter: bool) -> str:
         else:
             sources.append({"path": archive_path.name, "missing": True})
     payload = {
-        "cache_schema": 2,
+        "cache_schema": 3,
         "sources": sources,
         "use_jitter": bool(use_jitter),
         "random_seed": RANDOM_SEED,
@@ -152,6 +152,9 @@ def load_and_preprocess_all(
                     x_val, y_val = cached['x_val'], cached['y_val']
                     x_test, y_test = cached['x_test'], cached['y_test']
                     scaler = json.loads(str(cached['scaler_json'].item()))
+                    meta_train = json.loads(str(cached['meta_train_json'].item()))
+                    meta_val = json.loads(str(cached['meta_val_json'].item()))
+                    meta_test = json.loads(str(cached['meta_test_json'].item()))
         except (OSError, ValueError, KeyError, EOFError):
             cache_valid = False
 
@@ -312,7 +315,10 @@ def load_and_preprocess_all(
             x_val=x_val, y_val=y_val,
             x_test=x_test, y_test=y_test,
             scaler_json=json.dumps(scaler),
-            cache_fingerprint=np.asarray(fingerprint)
+            cache_fingerprint=np.asarray(fingerprint),
+            meta_train_json=np.asarray(json.dumps(meta_splits['train'])),
+            meta_val_json=np.asarray(json.dumps(meta_splits['val'])),
+            meta_test_json=np.asarray(json.dumps(meta_splits['test']))
         )
         print(f"Saved dataset cache to: {cache_file}")
 
@@ -348,10 +354,13 @@ def load_and_preprocess_all(
         with open(summary_file, 'w') as f:
             json.dump(split_summary, f, indent=2)
         print(f"Saved split summary to: {summary_file}")
+        meta_train = meta_splits['train']
+        meta_val = meta_splits['val']
+        meta_test = meta_splits['test']
 
-    train_ds = GridSentryDataset(x_train, y_train)
-    val_ds = GridSentryDataset(x_val, y_val)
-    test_ds = GridSentryDataset(x_test, y_test)
+    train_ds = GridSentryDataset(x_train, y_train, meta_train)
+    val_ds = GridSentryDataset(x_val, y_val, meta_val)
+    test_ds = GridSentryDataset(x_test, y_test, meta_test)
 
     return train_ds, val_ds, test_ds, scaler
 
