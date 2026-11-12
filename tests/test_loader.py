@@ -16,6 +16,7 @@ def loader():
     return MatlabSignalLoader()
 
 
+@pytest.mark.skipif(not DATASET_1_ZIP.exists(), reason="Dataset 1 archive is not present in this checkout")
 def test_loader_dataset_1_sample(loader):
     """Verifies loading a real recording from signals (dataset 1).zip."""
     sample_name = "sim_Chesf_500_Classifier_LOC3_AB_20_0_1.0000.mat"
@@ -32,6 +33,7 @@ def test_loader_dataset_1_sample(loader):
     assert meta['sampling_rate'] == 15360
 
 
+@pytest.mark.skipif(not DATASET_2_ZIP.exists(), reason="Dataset 2 archive is not present in this checkout")
 def test_loader_dataset_2_sample(loader):
     """Verifies loading a scenario slice from signals_with_compensation (dataset 2).zip."""
     sig, meta = loader.load_dataset_2_sample('AG', angle_idx=0, comp_idx=0, rf_idx=0, dist_idx=0)
