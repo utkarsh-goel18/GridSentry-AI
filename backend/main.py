@@ -3,6 +3,7 @@ GridSentry AI — FastAPI application.
 """
 import datetime
 import json
+import os
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -61,10 +62,11 @@ async def validation_exception_handler(
         content={"detail": errors}
     )
 
-# Restrict origins through GRID_SENTY_CORS_ORIGINS in deployment if the UI is hosted elsewhere.
+# Comma-separated allowlist; keep production origins explicit.
+_cors_origins = [origin.strip() for origin in os.getenv("GRID_SENTRY_CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
