@@ -212,7 +212,8 @@ def evaluate(
     cm = confusion_matrix(y_true, y_pred, labels=range(NUM_CLASSES))
 
     # Plot confusion matrix
-    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}.png"
+    plot_suffix = '' if split_strategy == 'random' else f'_{split_strategy}'
+    cm_plot_path = FIGURES_DIR / f"confusion_matrix_{model_name}{plot_suffix}.png"
     plot_confusion_matrix(cm, STANDARD_CLASSES, cm_plot_path)
 
     metrics_result = {
