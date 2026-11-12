@@ -13,6 +13,9 @@ export type Prediction = {
   predicted_fault: string;
   fault_description: string;
   confidence: number;
+  raw_confidence?: number;
+  confidence_is_calibrated: boolean;
+  calibration?: { available: boolean; method?: string; temperature?: number; split_strategy?: string; validation_samples?: number; reason?: string };
   class_probabilities: Record<string, number>;
   input_type: string;
   sample_metadata?: Record<string, unknown> | null;
