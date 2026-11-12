@@ -14,6 +14,17 @@ import torch
 import torch.nn.functional as F
 
 
+def calibration_path_for_checkpoint(checkpoint_path: Path, artifacts_dir: Path) -> Path:
+    """Resolve the calibration sidecar associated with a checkpoint filename."""
+    stem = Path(checkpoint_path).stem
+    if stem == "best_model":
+        filename = "calibration.json"
+    else:
+        suffix = stem.removeprefix("best_model_")
+        filename = f"calibration_{suffix}.json"
+    return Path(artifacts_dir) / filename
+
+
 def fit_temperature(logits: torch.Tensor, targets: torch.Tensor, max_iter: int = 100) -> Dict[str, Any]:
     """Fit one positive scalar temperature by minimizing validation NLL."""
     logits = logits.detach().float().cpu()
