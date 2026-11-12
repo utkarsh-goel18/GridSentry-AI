@@ -150,7 +150,8 @@ def train(
     weight_decay: float = WEIGHT_DECAY,
     patience: int = EARLY_STOPPING_PATIENCE,
     checkpoint_path: Path = BEST_MODEL_PATH,
-    split_strategy: str = 'random'
+    split_strategy: str = 'random',
+    config_output_path: Path = CONFIG_PATH
 ) -> Dict[str, Any]:
     """Complete training loop with validation, scheduling, and early stopping."""
     set_seed(RANDOM_SEED)
@@ -231,12 +232,14 @@ def train(
     print(f"Training completed in {total_time:.1f}s. Best Val Loss: {best_val_loss:.4f}, Val Acc: {best_val_acc*100:.2f}%")
 
     # Plot training curves
-    plot_path = FIGURES_DIR / f"training_history_{model_name}.png"
+    plot_suffix = '' if split_strategy == 'random' else f'_{split_strategy}'
+    plot_path = FIGURES_DIR / f"training_history_{model_name}{plot_suffix}.png"
     plot_training_curves(history, plot_path)
 
     # Save training configuration
     config_data = {
         'model_name': model_name,
+        'split_strategy': split_strategy,
         'parameters_count': model.count_parameters(),
         'best_epoch': best_epoch,
         'best_val_loss': float(best_val_loss),
@@ -258,7 +261,9 @@ def train(
         },
         'classes': STANDARD_CLASSES
     }
-    with open(CONFIG_PATH, 'w') as f:
+    config_output_path = Path(config_output_path)
+    config_output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_output_path, 'w') as f:
         json.dump(config_data, f, indent=2)
 
     return {
@@ -290,5 +295,6 @@ if __name__ == '__main__':
         batch_size=args.batch_size,
         learning_rate=args.lr,
         checkpoint_path=ckpt,
-        split_strategy=args.split_strategy
+        split_strategy=args.split_strategy,
+        config_output_path=cfg
     )
