@@ -149,14 +149,15 @@ def train(
     learning_rate: float = LEARNING_RATE,
     weight_decay: float = WEIGHT_DECAY,
     patience: int = EARLY_STOPPING_PATIENCE,
-    checkpoint_path: Path = BEST_MODEL_PATH
+    checkpoint_path: Path = BEST_MODEL_PATH,
+    split_strategy: str = 'random'
 ) -> Dict[str, Any]:
     """Complete training loop with validation, scheduling, and early stopping."""
     set_seed(RANDOM_SEED)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Starting training on device: {device} | Model: {model_name}")
 
-    train_loader, val_loader, test_loader, scaler = get_dataloaders(batch_size=batch_size)
+    train_loader, val_loader, test_loader, scaler = get_dataloaders(batch_size=batch_size, split_strategy=split_strategy)
 
     model = get_model(model_name, num_classes=NUM_CLASSES).to(device)
     print(f"Model architecture initialized ({model.count_parameters():,} trainable parameters)")
@@ -210,6 +211,7 @@ def train(
                 'val_loss': va_loss,
                 'val_accuracy': va_acc,
                 'model_name': model_name,
+                'split_strategy': split_strategy,
                 'num_classes': NUM_CLASSES,
                 'in_channels': 6,
                 'window_length': WINDOW_LENGTH,
@@ -275,6 +277,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE, help='Batch size')
     parser.add_argument('--lr', type=float, default=LEARNING_RATE, help='Learning rate')
     parser.add_argument('--checkpoint', type=str, default=None, help='Custom path to save checkpoint')
+    parser.add_argument('--split-strategy', choices=['random', 'distance_holdout', 'resistance_holdout', 'angle_holdout'], default='random', help='Scenario grouping strategy')
     parser.add_argument('--config-out', type=str, default=None, help='Custom path to save config JSON')
     args = parser.parse_args()
 
@@ -286,5 +289,6 @@ if __name__ == '__main__':
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,
-        checkpoint_path=ckpt
+        checkpoint_path=ckpt,
+        split_strategy=args.split_strategy
     )
