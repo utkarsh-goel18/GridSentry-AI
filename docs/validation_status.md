@@ -38,13 +38,13 @@ The raw dataset archives are intentionally not committed. After placing both sou
 
 ```powershell
 python -m pytest -q
-python -m ml.train --model 1d_cnn
-python -m ml.evaluate --checkpoint artifacts/best_model.pt --output artifacts/evaluation_metrics.json
+python -m ml.train --model 1d_cnn --split-strategy random --checkpoint artifacts/best_model_random_audit.pt --config-out artifacts/config_random_audit.json
+python -m ml.evaluate --checkpoint artifacts/best_model_random_audit.pt --output artifacts/evaluation_metrics_random_audit.json --split-strategy random
 ```
 
 The preprocessing cache fingerprint was advanced when scenario metadata became part of the cache. A stale cache will be rebuilt automatically. Keep the generated metrics, checkpoint, scaler and split summary together; they must come from the same run.
 
-Before making any external-validity claim, add and report separate group-holdout experiments for distance, resistance and inception angle, followed by cross-topology or field-data validation. Do not tune the model against the final test set, and do not change reported scores to target a preferred percentage.
+The repository now includes separate group-holdout strategies for distance, resistance and inception angle. Run the complete reproducible suite with `powershell -ExecutionPolicy Bypass -File scripts/run_robustness_suite.ps1`. It trains a fresh model for each split, uses separate checkpoints/configs/metrics, and leaves the production `best_model.pt` untouched. Compare the resulting test metrics across protocols. These are still tests within the same benchmark family; cross-topology or field-data validation remains necessary. Do not tune the model against the final test set, and do not change reported scores to target a preferred percentage.
 
 ## API guarantees
 
