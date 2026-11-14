@@ -30,7 +30,8 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [active, setActive] = useState("overview");
   const [mobileNav, setMobileNav] = useState(false);
-  const [prediction, setPrediction] = useState<Prediction | null>(null);\n  const [samples, setSamples] = useState<Sample[]>([]);\n  const [selectedSample, setSelectedSample] = useState("");
+  const [prediction, setPrediction] = useState<Prediction | null>(null);
+  const [samples, setSamples] = useState<Sample[]>([]);\n  const [selectedSample, setSelectedSample] = useState("");
   const [predictError, setPredictError] = useState("");
   const [predicting, setPredicting] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -50,13 +51,25 @@ function App() {
       setConnectionError(e instanceof Error ? e.message : "Could not reach the API.");
     } finally { setRefreshing(false); }
   }
-  useEffect(() => { void refresh(); const id = window.setInterval(() => void refresh(), 30000); return () => window.clearInterval(id); }, []);\n  useEffect(() => {\n    if (connected && samples.length === 0) {\n      api.samples().then((items) => { setSamples(items); if (items.length) setSelectedSample(items[0].sample_id); })\n        .catch((error) => setPredictError(error instanceof Error ? error.message : "Could not load dataset samples."));\n    }\n  }, [connected, samples.length]);
+  useEffect(() => { void refresh(); const id = window.setInterval(() => void refresh(), 30000); return () => window.clearInterval(id); }, []);
+  useEffect(() => {
+    if (connected && samples.length === 0) {
+      api.samples().then((items) => { setSamples(items); if (items.length) setSelectedSample(items[0].sample_id); })
+        .catch((error) => setPredictError(error instanceof Error ? error.message : "Could not load dataset samples."));
+    }
+  }, [connected, samples.length]);
 
   const connected = health?.status === "healthy" && health.model_loaded;
   const metricAccuracy = model?.evaluation_summary?.test_accuracy;
   const classData = useMemo(() => faults.map((name) => ({ name, value: prediction?.class_probabilities?.[name] ?? 0 })), [prediction]);
 
-  async function runSamplePrediction() {\n    if (!selectedSample) return;\n    setPredictError(""); setPrediction(null); setPredicting(true);\n    try { setPrediction(await api.predictSample(selectedSample)); }\n    catch (e) { setPredictError(e instanceof Error ? e.message : "Unable to classify the selected sample."); }\n    finally { setPredicting(false); }\n  }\n\n  async function runPrediction() {
+  async function runSamplePrediction() {
+    if (!selectedSample) return;
+    setPredictError(""); setPrediction(null); setPredicting(true);
+    try { setPrediction(await api.predictSample(selectedSample)); }
+    catch (e) { setPredictError(e instanceof Error ? e.message : "Unable to classify the selected sample."); }\n    finally { setPredicting(false); }\n  }
+
+  async function runPrediction() {
     setPredictError(""); setPrediction(null);
     try {
       const parsed = JSON.parse(rawJson);
