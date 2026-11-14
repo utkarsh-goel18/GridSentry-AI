@@ -1,83 +1,108 @@
 # GridSentry AI
 
-**Transmission-line fault intelligence · Research prototype**
+**Transmission-line fault classification · Research prototype**
 
-GridSentry AI is a research prototype for classifying transmission-line faults from three-phase voltage and current waveforms. The repository contains the legacy ML benchmark and a V2 application track with a React dashboard and FastAPI inference service.
+GridSentry AI classifies simulated transmission-line faults from three-phase voltage and current waveforms. The repository contains a retained ML benchmark pipeline, evaluation/audit tooling, a FastAPI inference service, and a React + TypeScript dashboard.
 
-> **Research-use notice:** Current datasets are simulated recordings for a 500 kV transmission-line benchmark. The project is not a certified protective relay and must not be connected to operational grid protection or used to make switching decisions. Real-world, unseen-topology and hardware-in-the-loop validation are required.
+> **Research-use notice:** This is a research/demo prototype trained and evaluated using simulated recordings from a 500 kV transmission-line benchmark. It is not a certified protective relay. Do not connect it to operational protection equipment or use its predictions for switching or grid-control decisions. Field measurements, unseen network topologies, hardware-in-the-loop testing, and safety validation are still required.
 
-## V2 dashboard
+## Repository layout
 
-The React + TypeScript dashboard lives in `frontend/`. It displays API health and model metadata, explains the supported fault taxonomy, and sends user-provided waveform JSON to the inference API. It deliberately labels the waveform chart as illustrative and never invents model metrics or predictions.
+| Path | Purpose |
+|---|---|
+| `backend/` | FastAPI application, request schemas, inference service |
+| `frontend/` | React + TypeScript + Vite dashboard |
+| `ml/` | Dataset ingestion, preprocessing, model, training, evaluation and audit code |
+| `scripts/` | Reproducible robustness and inference smoke-test helpers |
+| `tests/` | Python unit and API tests |
+| `artifacts/` | Tracked model/scaler files and retained historical research outputs |
+| `docs/` | API, methodology, dataset audit, architecture and validation documentation |
 
-### Start the backend
+## Quick start (Windows PowerShell)
+
+### 1. Python environment and backend
 
 From the repository root:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-The API expects the configured model checkpoint and scaler under `artifacts/`. If they are missing or incompatible, the service reports a degraded state and prediction remains unavailable.
+The backend loads the configured checkpoint and scaler from `artifacts/`. If the checkpoint or scaler is missing or incompatible, the API remains available in a degraded state and prediction returns unavailable rather than fabricating a result.
 
-### Start the frontend
+### 2. Dashboard
 
 In a second terminal:
 
 ```powershell
 cd frontend
-npm install
+npm ci
 Copy-Item .env.example .env
 npm run dev
 ```
 
-Open http://localhost:5173. Set `VITE_API_URL` in `frontend/.env` if the API is hosted elsewhere.
+Open [http://localhost:5173](http://localhost:5173). The default API URL is `http://127.0.0.1:8000`. Set `VITE_API_URL` in `frontend/.env` when the API is hosted elsewhere.
 
-### Production frontend build
+### 3. Production frontend build
 
 ```powershell
 cd frontend
+npm ci
 npm run build
 npm run preview
 ```
 
-## API
+## API endpoints
 
-- `GET /health` — service and model readiness
-- `GET /model-info` — model metadata and available evaluation summary
-- `GET /samples` — representative Dataset 1 sample identifiers
-- `POST /predict` — classify a sample identifier or six-channel waveform
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/health` | Service and model readiness |
+| GET | `/model-info` | Loaded model metadata and eligible evaluation summary |
+| GET | `/samples` | Representative Dataset 1 sample identifiers (requires the local Dataset 1 archive) |
+| POST | `/predict` | Classify a sample identifier or six-channel waveform |
 
-Interactive API documentation is available at `/docs` when the backend is running.
+Interactive Swagger documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) while the backend is running. See [API specification](docs/api_spec.md).
 
-## Dataset inputs
+## Dataset setup
 
-The raw ZIP archives are not committed to Git. Place the original archives in the repository root using the configured names:
+Raw source archives are intentionally excluded from Git. Place the original archives in the repository root with these exact names:
 
 - `signals (dataset 1).zip`
 - `signals_with_compensation (dataset 2).zip`
 
-Do not rename, modify or regenerate source data without recording provenance and checksums. See [dataset audit](docs/dataset_audit.md) and [V2 rebuild protocol](docs/v2_rebuild_protocol.md).
+Do not modify or regenerate source data without recording provenance and checksums. See [dataset audit](docs/dataset_audit.md) and [methodology](docs/methodology.md).
 
-## Existing ML benchmark
+## Results and validation
 
-The original 1D CNN and baseline MLP, dataset loader, training/evaluation scripts and historical artifacts are retained for traceability. Previously reported 100% scores are historical benchmark outputs; they are not a V2 result or evidence of field reliability. See [validation status](docs/validation_status.md).
+Read [the evaluation and readiness report](docs/final_evaluation_report.md) and [validation status](docs/validation_status.md) before interpreting any metric.
 
-## Development
+The retained `artifacts/evaluation_metrics.json` and baseline outputs are historical benchmark artifacts. They predate the current split-integrity metadata contract and are deliberately not exposed by the dashboard as validated performance. The evaluation report records separate random, distance, resistance and angle holdout results; the distance and resistance holdouts show material generalisation weaknesses. These synthetic-benchmark results are not field accuracy.
 
-```powershell
-python -m pytest -v
-```
-
-Frontend checks:
+Run the full local Python test suite:
 
 ```powershell
-cd frontend
-npm install
-npm run build
+python -m pytest -q
 ```
 
-See [V2 architecture](docs/v2_architecture.md) for the application boundaries and [V2 rebuild protocol](docs/v2_rebuild_protocol.md) for the acceptance gates.
+Run the four-protocol robustness suite (requires the source dataset archives):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_robustness_suite.ps1
+```
+
+The robustness suite writes strategy-specific checkpoints, configs and metrics and leaves the default inference checkpoint untouched. Review the generated outputs before updating any published result.
+
+## Safety and scope
+
+- The model predicts one of ten configured fault classes; it is not an open-set or non-fault detector.
+- Neither source archive contains a separately labelled normal or overload class.
+- A high softmax score is not proof of calibration, reliability or physical correctness.
+- Do not use the prototype for live grid control, relay tripping or operational decisions.
+
+## Development checks
+
+CI runs the Python test suite and a clean frontend production build on pull requests to `main`. Frontend dependencies are installed from the committed lockfile with `npm ci`.
