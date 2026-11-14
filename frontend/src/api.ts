@@ -39,6 +39,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<Health>("/health"),
   modelInfo: () => request<ModelInfo>("/model-info"),
+  samples: async () => (await request<{ total_samples: number; samples: Sample[] }>("/samples")).samples,
+  predictSample: (sample_id: string) =>
+    request<Prediction>("/predict", { method: "POST", body: JSON.stringify({ sample_id }) }),
   predict: (waveform: number[][], fault_index?: number) =>
     request<Prediction>("/predict", { method: "POST", body: JSON.stringify({ waveform, ...(fault_index === undefined ? {} : { fault_index }) }) })
 };
