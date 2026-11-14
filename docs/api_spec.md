@@ -29,7 +29,7 @@ Returns the operational status of the service, whether the PyTorch model is load
 ## 2. Model Metadata & Taxonomy
 
 ### `GET /model-info`
-Provides model architecture specifications, channel order, input dimensions, class taxonomy, and held-out test evaluation metrics.
+Provides model architecture specifications, channel order, input dimensions, class taxonomy, and an evaluation summary only when the metrics artifact includes the required evaluation protocol and split-integrity audit.
 
 #### Response: `200 OK`
 ```json
