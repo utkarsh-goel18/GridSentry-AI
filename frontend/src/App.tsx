@@ -31,7 +31,8 @@ function App() {
   const [active, setActive] = useState("overview");
   const [mobileNav, setMobileNav] = useState(false);
   const [prediction, setPrediction] = useState<Prediction | null>(null);
-  const [samples, setSamples] = useState<Sample[]>([]);\n  const [selectedSample, setSelectedSample] = useState("");
+  const [samples, setSamples] = useState<Sample[]>([]);
+  const [selectedSample, setSelectedSample] = useState("");
   const [predictError, setPredictError] = useState("");
   const [predicting, setPredicting] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -52,6 +53,7 @@ function App() {
     } finally { setRefreshing(false); }
   }
   useEffect(() => { void refresh(); const id = window.setInterval(() => void refresh(), 30000); return () => window.clearInterval(id); }, []);
+  const connected = health?.status === "healthy" && health.model_loaded;
   useEffect(() => {
     if (connected && samples.length === 0) {
       api.samples().then((items) => { setSamples(items); if (items.length) setSelectedSample(items[0].sample_id); })
@@ -59,7 +61,6 @@ function App() {
     }
   }, [connected, samples.length]);
 
-  const connected = health?.status === "healthy" && health.model_loaded;
   const metricAccuracy = model?.evaluation_summary?.test_accuracy;
   const classData = useMemo(() => faults.map((name) => ({ name, value: prediction?.class_probabilities?.[name] ?? 0 })), [prediction]);
 
@@ -67,7 +68,9 @@ function App() {
     if (!selectedSample) return;
     setPredictError(""); setPrediction(null); setPredicting(true);
     try { setPrediction(await api.predictSample(selectedSample)); }
-    catch (e) { setPredictError(e instanceof Error ? e.message : "Unable to classify the selected sample."); }\n    finally { setPredicting(false); }\n  }
+    catch (e) { setPredictError(e instanceof Error ? e.message : "Unable to classify the selected sample."); }
+    finally { setPredicting(false); }
+  }
 
   async function runPrediction() {
     setPredictError(""); setPrediction(null);
