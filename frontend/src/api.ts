@@ -9,6 +9,7 @@ export type ModelInfo = {
   evaluation_summary?: { test_accuracy?: number; macro_f1?: number; weighted_f1?: number } | null;
   dataset_summary?: Record<string, number> | null;
 };
+export type Sample = { sample_id: string; fault_class: string; description: string; distance_km: number; resistance_ohm: number; angle_deg: number; compensation: number };
 export type Prediction = {
   predicted_fault: string;
   fault_description: string;
@@ -38,6 +39,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<Health>("/health"),
   modelInfo: () => request<ModelInfo>("/model-info"),
+  samples: async () => (await request<{ total_samples: number; samples: Sample[] }>("/samples")).samples,
+  predictSample: (sample_id: string) =>
+    request<Prediction>("/predict", { method: "POST", body: JSON.stringify({ sample_id }) }),
   predict: (waveform: number[][], fault_index?: number) =>
     request<Prediction>("/predict", { method: "POST", body: JSON.stringify({ waveform, ...(fault_index === undefined ? {} : { fault_index }) }) })
 };
