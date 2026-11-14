@@ -9,7 +9,7 @@ export type ModelInfo = {
   evaluation_summary?: { test_accuracy?: number; macro_f1?: number; weighted_f1?: number } | null;
   dataset_summary?: Record<string, number> | null;
 };
-export type Prediction = {
+export type Sample = { sample_id: string; fault_class: string; description: string; distance_km: number; resistance_ohm: number; angle_deg: number; compensation: number };\nexport type Prediction = {
   predicted_fault: string;
   fault_description: string;
   confidence: number;
