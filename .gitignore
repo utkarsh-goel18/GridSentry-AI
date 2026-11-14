@@ -1,15 +1,18 @@
-# Byte-compiled / optimized / DLL files
+# Python bytecode and tooling caches
 __pycache__/
 *.py[cod]
 *$py.class
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.tox/
+.nox/
 
-# C extensions
-*.so
-
-# Distribution / packaging
+# Python packaging and virtual environments
 .Python
 build/
-develop-eggs/
 dist/
 downloads/
 eggs/
@@ -23,40 +26,50 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual environments
 venv/
 .venv/
 env/
 ENV/
 
-# Large datasets & raw files
+# Local datasets and generated preprocessing caches
 *.zip
+*.mat
+*.npz
 data/
 extracted_data/
-*.mat
 raw_signals/
 artifacts/cache/
-*.npz
 
-# Testing & Coverage
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Tests, coverage, logs and local databases
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+*.log
+*.sqlite
+*.sqlite3
+*.db
 
-# IDE / Editor configs
+# Frontend dependencies and generated output
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.vite/
+frontend/.turbo/
+
+# IDE, editor and operating-system files
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# OS files
+*.tmp
+*.bak
+*.orig
 .DS_Store
 Thumbs.db
-
-# Frontend dependencies and build output
-frontend/node_modules/
-frontend/dist/
-frontend/.env
-frontend/.env.*
-!frontend/.env.example
