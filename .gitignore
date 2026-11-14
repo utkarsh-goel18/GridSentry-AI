@@ -60,3 +60,38 @@ frontend/dist/
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!frontend/.env.example
+
+# Additional Python tooling caches
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.pytype/
+.pytest_cache/
+
+# Logs, coverage and temporary databases
+*.log
+coverage.xml
+.coverage.*
+htmlcov/
+*.sqlite
+*.sqlite3
+*.db
+
+# Frontend test/build output
+frontend/coverage/
+frontend/.vite/
+frontend/.turbo/
+
+# Local OS/editor temporary files
+*.tmp
+*.bak
+*.orig
